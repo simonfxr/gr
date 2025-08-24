@@ -38,12 +38,13 @@ type PRListCmd struct {
 }
 
 type PRCreateCmd struct {
-	Title  string `arg:"--title" help:"PR title"`
-	Body   string `arg:"--body" help:"PR description/body"`
-	Base   string `arg:"--base" help:"target branch (default: repo default)"`
-	Head   string `arg:"--head" help:"source branch (default: current)"`
-	Draft  bool   `arg:"--draft" help:"create as draft PR"`
-	NoEdit bool   `arg:"--no-edit" help:"skip interactive editing"`
+	Title              string `arg:"--title" help:"PR title"`
+	Body               string `arg:"--body" help:"PR description/body"`
+	Base               string `arg:"--base" help:"target branch (default: repo default)"`
+	Head               string `arg:"--head" help:"source branch (default: current)"`
+	Draft              bool   `arg:"--draft" help:"create as draft PR"`
+	NoEdit             bool   `arg:"--no-edit" help:"skip interactive editing"`
+	NoDeleteAfterMerge bool   `arg:"--no-delete-after-merge" help:"keep source branch after merge (default: delete)"`
 }
 
 type PRViewCmd struct {
@@ -127,11 +128,12 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 		}
 		ctx := context.Background()
 		res, err := info.Provider.PrCreate(ctx, info, provider.CreateOptions{
-			Title: cmd.Create.Title,
-			Body:  cmd.Create.Body,
-			Base:  cmd.Create.Base,
-			Head:  cmd.Create.Head,
-			Draft: cmd.Create.Draft,
+			Title:            cmd.Create.Title,
+			Body:             cmd.Create.Body,
+			Base:             cmd.Create.Base,
+			Head:             cmd.Create.Head,
+			Draft:            cmd.Create.Draft,
+			DeleteAfterMerge: !cmd.Create.NoDeleteAfterMerge,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)

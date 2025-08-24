@@ -14,11 +14,12 @@ import (
 
 // CreateOptions controls PR/MR creation.
 type CreateOptions struct {
-	Title string
-	Body  string
-	Base  string // target branch
-	Head  string // source branch
-	Draft bool
+	Title            string
+	Body             string
+	Base             string // target branch
+	Head             string // source branch
+	Draft            bool
+	DeleteAfterMerge bool
 }
 
 // PrCreate creates a pull/merge request on the detected provider.
@@ -165,7 +166,7 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 		SourceBranch:       gitlab.Ptr(head),
 		TargetBranch:       gitlab.Ptr(base),
 		Description:        gitlab.Ptr(in.Body),
-		RemoveSourceBranch: gitlab.Ptr(false),
+		RemoveSourceBranch: gitlab.Ptr(in.DeleteAfterMerge),
 	})
 	if err != nil {
 		return nil, err
@@ -249,6 +250,7 @@ func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDet
 		SourceBranch:      head,
 		DestinationBranch: base,
 		Draft:             in.Draft,
+		CloseSourceBranch: in.DeleteAfterMerge,
 	}
 	createdRes, err := bb.Repositories.PullRequests.Create(po)
 	if err != nil {
