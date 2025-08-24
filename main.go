@@ -181,8 +181,24 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 	case cmd.Checkout != nil:
 		fmt.Printf("[stub] pr checkout #%d\n", cmd.Checkout.Number)
 	case cmd.Merge != nil:
-		fmt.Printf("[stub] pr merge #%d method=%s delete-branch=%v\n",
-			cmd.Merge.Number, cmd.Merge.Method, cmd.Merge.DeleteBranch)
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		res, err := info.Provider.PrMerge(ctx, info, cmd.Merge.Number, provider.MergeOptions{
+			Method:       cmd.Merge.Method,
+			DeleteBranch: cmd.Merge.DeleteBranch,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		state := "merged"
+		if res != nil && res.State != "" {
+			state = res.State
+		}
+		fmt.Printf("PR #%d %s.\n", cmd.Merge.Number, state)
 	case cmd.Close != nil:
 		fmt.Printf("[stub] pr close #%d\n", cmd.Close.Number)
 	default:
