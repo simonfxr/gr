@@ -121,8 +121,23 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 				pr.Number, title, pr.Author, pr.State, pr.CreatedAt.Format(time.RFC3339)[:19])
 		}
 	case cmd.Create != nil:
-		fmt.Printf("[stub] pr create title=%q draft=%v base=%s head=%s no-edit=%v\n",
-			cmd.Create.Title, cmd.Create.Draft, cmd.Create.Base, cmd.Create.Head, cmd.Create.NoEdit)
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		res, err := info.Provider.PrCreate(ctx, info, provider.CreateOptions{
+			Title: cmd.Create.Title,
+			Body:  cmd.Create.Body,
+			Base:  cmd.Create.Base,
+			Head:  cmd.Create.Head,
+			Draft: cmd.Create.Draft,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		fmt.Printf("Created PR #%d: %s\n", res.Number, res.URL)
 	case cmd.View != nil:
 		if info == nil {
 			fmt.Println("Cannot detect provider/repo info; aborting")

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	git "github.com/go-git/go-git/v5"
 	githublib "github.com/google/go-github/v74/github"
 	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
@@ -66,4 +67,63 @@ func bitbucketClient(nfo *Info) (*bitbucket.Client, error) {
 		return bitbucket.NewOAuthbearerToken(token), nil
 	}
 	return nil, errors.New("BITBUCKET_TOKEN not set (or provide BITBUCKET_USERNAME + BITBUCKET_TOKEN)")
+}
+
+// CurrentBranch returns the current branch name of the repository detected from Info.
+func CurrentBranch(nfo *Info) (string, error) {
+	root, err := FindRepoRoot("")
+	if err != nil {
+		return "", err
+	}
+	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return "", err
+	}
+	head, err := repo.Head()
+	if err != nil {
+		return "", err
+	}
+	return head.Name().Short(), nil
+}
+
+// DefaultBranchGitHub returns the default branch for a GitHub repository.
+func DefaultBranchGitHub(ctx context.Context, gh *githublib.Client, nfo *Info) (string, error) {
+	repo, _, err := gh.Repositories.Get(ctx, nfo.Owner, nfo.Repo)
+	if err != nil {
+		return "", err
+	}
+	b := repo.GetDefaultBranch()
+	if b == "" {
+		return "main", nil
+	}
+	return b, nil
+}
+
+// DefaultBranchGitLab returns the default branch for a GitLab project.
+func DefaultBranchGitLab(ctx context.Context, gl *gitlab.Client, nfo *Info) (string, error) {
+	projectPath := nfo.Owner + "/" + nfo.Repo
+	proj, _, err := gl.Projects.GetProject(projectPath, nil)
+	if err != nil {
+		return "", err
+	}
+	if proj.DefaultBranch != "" {
+		return proj.DefaultBranch, nil
+	}
+	return "main", nil
+}
+
+// DefaultBranchBitbucket returns the main branch (default) for a Bitbucket Cloud repository.
+func DefaultBranchBitbucket(ctx context.Context, bb *bitbucket.Client, nfo *Info) (string, error) {
+	_ = ctx
+	repo, err := bb.Repositories.Repository.Get(&bitbucket.RepositoryOptions{
+		Owner:    nfo.Owner,
+		RepoSlug: nfo.Repo,
+	})
+	if err != nil {
+		return "", err
+	}
+	if repo != nil && repo.Mainbranch.Name != "" {
+		return repo.Mainbranch.Name, nil
+	}
+	return "main", nil
 }
