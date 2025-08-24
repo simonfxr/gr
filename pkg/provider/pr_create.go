@@ -70,8 +70,13 @@ func prCreateGitHub(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 		return nil, fmt.Errorf("a pull request already exists for branch %q", head)
 	}
 
+	title, err := ResolvePRTitle(in.Title, nfo)
+	if err != nil {
+		return nil, err
+	}
+
 	npr := &githublib.NewPullRequest{
-		Title: githublib.String(in.Title),
+		Title: githublib.String(title),
 		Head:  githublib.String(head),
 		Base:  githublib.String(base),
 		Body:  githublib.String(in.Body),
@@ -150,8 +155,13 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 		return nil, fmt.Errorf("a merge request already exists for branch %q", head)
 	}
 
+	title, err := ResolvePRTitle(in.Title, nfo)
+	if err != nil {
+		return nil, err
+	}
+
 	mr, _, err := gl.MergeRequests.CreateMergeRequest(project, &gitlab.CreateMergeRequestOptions{
-		Title:              gitlab.Ptr(in.Title),
+		Title:              gitlab.Ptr(title),
 		SourceBranch:       gitlab.Ptr(head),
 		TargetBranch:       gitlab.Ptr(base),
 		Description:        gitlab.Ptr(in.Body),
@@ -226,10 +236,15 @@ func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDet
 		}
 	}
 
+	title, err := ResolvePRTitle(in.Title, nfo)
+	if err != nil {
+		return nil, err
+	}
+
 	po := &bitbucket.PullRequestsOptions{
 		Owner:             nfo.Owner,
 		RepoSlug:          nfo.Repo,
-		Title:             in.Title,
+		Title:             title,
 		Description:       in.Body,
 		SourceBranch:      head,
 		DestinationBranch: base,
@@ -244,7 +259,7 @@ func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDet
 		return nil, fmt.Errorf("unexpected response from bitbucket create")
 	}
 	// Parse into PRDetails
-	title, _ := pr["title"].(string)
+	prTitle, _ := pr["title"].(string)
 	body, _ := pr["description"].(string)
 	state, _ := pr["state"].(string)
 	author := ""
@@ -273,7 +288,7 @@ func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDet
 	}
 	return &PRDetails{
 		Number:    num,
-		Title:     title,
+		Title:     prTitle,
 		Body:      body,
 		Author:    author,
 		State:     strings.ToLower(state),

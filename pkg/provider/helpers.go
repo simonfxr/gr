@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	githublib "github.com/google/go-github/v74/github"
 	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
@@ -126,4 +127,47 @@ func DefaultBranchBitbucket(ctx context.Context, bb *bitbucket.Client, nfo *Info
 		return repo.Mainbranch.Name, nil
 	}
 	return "main", nil
+}
+
+// LastCommitTitle returns the first line of the last commit message on HEAD.
+func LastCommitTitle(nfo *Info) (string, error) {
+	root, err := FindRepoRoot("")
+	if err != nil {
+		return "", err
+	}
+	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return "", err
+	}
+	ref, err := repo.Head()
+	if err != nil {
+		return "", err
+	}
+	commit, err := repo.CommitObject(ref.Hash())
+	if err != nil {
+		return "", err
+	}
+	// keep object import referenced
+	_ = object.Commit{}
+	msg := strings.TrimSpace(commit.Message)
+	if msg == "" {
+		return "", nil
+	}
+	if i := strings.IndexByte(msg, '\n'); i >= 0 {
+		msg = msg[:i]
+	}
+	return strings.TrimSpace(msg), nil
+}
+
+// ResolvePRTitle ensures a non-empty title, using last commit subject when missing.
+func ResolvePRTitle(inTitle string, nfo *Info) (string, error) {
+	t := strings.TrimSpace(inTitle)
+	if t != "" {
+		return t, nil
+	}
+	last, err := LastCommitTitle(nfo)
+	if err == nil && strings.TrimSpace(last) != "" {
+		return last, nil
+	}
+	return "", errors.New("PR title is required; provide --title or make a commit")
 }
