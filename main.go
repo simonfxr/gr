@@ -94,13 +94,22 @@ func main() {
 // Branch command group
 type BranchCmd struct {
 	Rename *BranchRenameCmd `arg:"subcommand:rename" help:"rename a branch locally/remotely"`
+	Delete *BranchDeleteCmd `arg:"subcommand:delete" help:"delete a branch locally/remotely"`
 }
 
 type BranchRenameCmd struct {
-    Old       string `arg:"positional,required" help:"old branch name"`
-    New       string `arg:"positional,required" help:"new branch name"`
-    LocalOnly  bool `arg:"--local-only" help:"rename only locally, do not touch remote"`
-    NoUpdatePRs bool `arg:"--no-update-prs" help:"do not retarget open PRs/MRs to new branch name"`
+	Old         string `arg:"positional,required" help:"old branch name"`
+	New         string `arg:"positional,required" help:"new branch name"`
+	LocalOnly   bool   `arg:"--local-only" help:"rename only locally, do not touch remote"`
+	NoUpdatePRs bool   `arg:"--no-update-prs" help:"do not retarget open PRs/MRs to new branch name"`
+}
+
+type BranchDeleteCmd struct {
+	Name       string `arg:"positional,required" help:"branch name to delete"`
+	LocalOnly  bool   `arg:"--local-only" help:"delete local branch only"`
+	RemoteOnly bool   `arg:"--remote-only" help:"delete remote branch only"`
+	Force      bool   `arg:"--force" help:"force deletion (skip safety checks where supported)"`
+	DryRun     bool   `arg:"--dry-run" help:"show actions without performing them"`
 }
 
 func runBranch(cmd *BranchCmd, info *provider.Info) {
@@ -119,11 +128,66 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 			return
 		}
 		ctx := context.Background()
-        if err := info.Provider.BranchRename(ctx, info, cmd.Rename.Old, cmd.Rename.New, provider.BranchRenameOptions{NoUpdatePRs: cmd.Rename.NoUpdatePRs}); err != nil {
-            fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-            return
-        }
+		if err := info.Provider.BranchRename(ctx, info, cmd.Rename.Old, cmd.Rename.New, provider.BranchRenameOptions{NoUpdatePRs: cmd.Rename.NoUpdatePRs}); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
 		fmt.Printf("Renamed remote branch %q -> %q.\n", cmd.Rename.Old, cmd.Rename.New)
+	case cmd.Delete != nil:
+		d := cmd.Delete
+		if d.DryRun {
+			// Describe what would happen
+			if d.LocalOnly {
+				fmt.Printf("[dry-run] Would delete local branch %q.\n", d.Name)
+				return
+			}
+			if d.RemoteOnly {
+				if info == nil {
+					fmt.Println("[dry-run] Cannot detect provider/repo info; aborting")
+					return
+				}
+				fmt.Printf("[dry-run] Would delete remote branch %q on %s/%s.\n", d.Name, info.Owner, info.Repo)
+				return
+			}
+			if info == nil {
+				fmt.Println("[dry-run] Cannot detect provider/repo info; aborting")
+				return
+			}
+			fmt.Printf("[dry-run] Would delete remote branch %q on %s/%s and local branch.\n", d.Name, info.Owner, info.Repo)
+			return
+		}
+		// Execute
+		if d.LocalOnly {
+			if err := provider.LocalBranchDelete(d.Name, d.Force); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return
+			}
+			fmt.Printf("Deleted local branch %q.\n", d.Name)
+			return
+		}
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		if d.RemoteOnly {
+			if err := info.Provider.BranchDelete(ctx, info, d.Name, provider.BranchDeleteOptions{Force: d.Force}); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return
+			}
+			fmt.Printf("Deleted remote branch %q.\n", d.Name)
+			return
+		}
+		// Both: remote then local
+		if err := info.Provider.BranchDelete(ctx, info, d.Name, provider.BranchDeleteOptions{Force: d.Force}); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		if err := provider.LocalBranchDelete(d.Name, d.Force); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: remote deleted, but failed to delete local branch: %v\n", err)
+			return
+		}
+		fmt.Printf("Deleted remote and local branch %q.\n", d.Name)
 	default:
 		fmt.Println("'gr branch' requires a subcommand. Try 'gr branch rename'.")
 	}

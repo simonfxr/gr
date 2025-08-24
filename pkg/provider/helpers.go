@@ -209,3 +209,41 @@ func LocalBranchRename(oldName, newName string) error {
 	}
 	return nil
 }
+
+// LocalBranchDelete deletes a local branch reference. It refuses to delete the
+// currently checked out branch. The force flag is currently ignored for safety
+// (git also refuses deletion of the current branch).
+func LocalBranchDelete(name string, force bool) error {
+	_ = force
+	root, err := FindRepoRoot("")
+	if err != nil {
+		return err
+	}
+	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return err
+	}
+	st := repo.Storer
+	// Determine current branch
+	headRef, err := repo.Head()
+	if err != nil {
+		return err
+	}
+	cur := headRef.Name().Short()
+	target := strings.TrimSpace(name)
+	if target == "" {
+		return errors.New("branch name is required")
+	}
+	if cur == target {
+		return errors.New("cannot delete the current branch")
+	}
+	// Remove reference if exists
+	refName := plumbing.NewBranchReferenceName(target)
+	if _, err := repo.Reference(refName, true); err != nil {
+		return err
+	}
+	if err := st.RemoveReference(refName); err != nil {
+		return err
+	}
+	return nil
+}

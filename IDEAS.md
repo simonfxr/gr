@@ -107,7 +107,7 @@ gr branch list --no-merged          # List unmerged branches
 gr branch list --pattern="feature/*" # List feature branches
 ```
 
-#### `gr branch delete <BRANCH_NAME> [OPTIONS]`
+#### ✅ `gr branch delete <BRANCH_NAME> [OPTIONS]`
 
 Delete a branch both locally and remotely.
 
@@ -116,7 +116,6 @@ Delete a branch both locally and remotely.
 - `--local-only` - Delete local branch only, keep remote
 - `--remote-only` - Delete remote branch only, keep local
 - `--dry-run` - Show what would be deleted without doing it
-- `--yes` - Skip confirmation prompts
 
 **Examples:**
 ```bash

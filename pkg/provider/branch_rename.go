@@ -11,7 +11,7 @@ import (
 )
 
 type BranchRenameOptions struct {
-    NoUpdatePRs bool
+	NoUpdatePRs bool
 }
 
 // BranchRename renames a remote branch across providers.
@@ -49,16 +49,16 @@ func branchRenameGitLab(ctx context.Context, nfo *Info, oldName, newName string,
 	}
 	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
 
-    if !opts.NoUpdatePRs {
-        // Block if any open MRs use oldName as source branch.
-        srcCount, err := countGitLabOpenMRs(gl, project, &oldName, nil)
-        if err != nil {
-            return err
-        }
-        if srcCount > 0 {
-            return fmt.Errorf("found %d open merge request(s) with source branch %q; cannot update MR source branch on GitLab. Close/merge or recreate them pointing to %q, then retry", srcCount, oldName, newName)
-        }
-    }
+	if !opts.NoUpdatePRs {
+		// Block if any open MRs use oldName as source branch.
+		srcCount, err := countGitLabOpenMRs(gl, project, &oldName, nil)
+		if err != nil {
+			return err
+		}
+		if srcCount > 0 {
+			return fmt.Errorf("found %d open merge request(s) with source branch %q; cannot update MR source branch on GitLab. Close/merge or recreate them pointing to %q, then retry", srcCount, oldName, newName)
+		}
+	}
 
 	// Ensure new branch exists
 	if _, _, err := gl.Branches.CreateBranch(project, &gitlab.CreateBranchOptions{Branch: gitlab.Ptr(newName), Ref: gitlab.Ptr(oldName)}); err != nil {
@@ -68,11 +68,11 @@ func branchRenameGitLab(ctx context.Context, nfo *Info, oldName, newName string,
 	}
 
 	// Retarget MRs with target == oldName
-    if !opts.NoUpdatePRs {
-        if err := retargetGitLabMRs(gl, project, oldName, newName); err != nil {
-            return err
-        }
-    }
+	if !opts.NoUpdatePRs {
+		if err := retargetGitLabMRs(gl, project, oldName, newName); err != nil {
+			return err
+		}
+	}
 
 	// Delete old branch
 	if _, err := gl.Branches.DeleteBranch(project, oldName); err != nil {
@@ -108,20 +108,20 @@ func branchRenameBitbucket(ctx context.Context, nfo *Info, oldName, newName stri
 	}
 
 	// Retarget destination branch on open PRs and also source branch where applicable.
-    if !opts.NoUpdatePRs {
-        // Destination retargeting
-        if err := bitbucketRetargetPRs(bb, nfo.Owner, nfo.Repo, fmt.Sprintf("destination.branch.name = \"%s\"", oldName), func(po *bitbucket.PullRequestsOptions) {
-            po.DestinationBranch = newName
-        }); err != nil {
-            return err
-        }
-        // Source retargeting
-        if err := bitbucketRetargetPRs(bb, nfo.Owner, nfo.Repo, fmt.Sprintf("source.branch.name = \"%s\"", oldName), func(po *bitbucket.PullRequestsOptions) {
-            po.SourceBranch = newName
-        }); err != nil {
-            return err
-        }
-    }
+	if !opts.NoUpdatePRs {
+		// Destination retargeting
+		if err := bitbucketRetargetPRs(bb, nfo.Owner, nfo.Repo, fmt.Sprintf("destination.branch.name = \"%s\"", oldName), func(po *bitbucket.PullRequestsOptions) {
+			po.DestinationBranch = newName
+		}); err != nil {
+			return err
+		}
+		// Source retargeting
+		if err := bitbucketRetargetPRs(bb, nfo.Owner, nfo.Repo, fmt.Sprintf("source.branch.name = \"%s\"", oldName), func(po *bitbucket.PullRequestsOptions) {
+			po.SourceBranch = newName
+		}); err != nil {
+			return err
+		}
+	}
 
 	if err := bb.Repositories.Repository.DeleteBranch(&bitbucket.RepositoryBranchDeleteOptions{Owner: nfo.Owner, RepoSlug: nfo.Repo, RefName: oldName}); err != nil {
 		return err
