@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	githublib "github.com/google/go-github/v74/github"
 	bitbucket "github.com/ktrysmt/go-bitbucket"
@@ -170,4 +171,41 @@ func ResolvePRTitle(inTitle string, nfo *Info) (string, error) {
 		return last, nil
 	}
 	return "", errors.New("PR title is required; provide --title or make a commit")
+}
+
+// LocalBranchRename renames a local branch reference and updates HEAD if needed.
+func LocalBranchRename(oldName, newName string) error {
+	root, err := FindRepoRoot("")
+	if err != nil {
+		return err
+	}
+	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return err
+	}
+	st := repo.Storer
+	oldRefName := plumbing.NewBranchReferenceName(strings.TrimSpace(oldName))
+	newRefName := plumbing.NewBranchReferenceName(strings.TrimSpace(newName))
+	oldRef, err := repo.Reference(oldRefName, true)
+	if err != nil {
+		return err
+	}
+	// Create new ref at same hash
+	newRef := plumbing.NewHashReference(newRefName, oldRef.Hash())
+	if err := st.SetReference(newRef); err != nil {
+		return err
+	}
+	// Remove old ref
+	if err := st.RemoveReference(oldRefName); err != nil {
+		return err
+	}
+	// If HEAD symbolically points to old, update to new
+	if headRef, err := st.Reference(plumbing.HEAD); err == nil && headRef.Type() == plumbing.SymbolicReference {
+		if headRef.Target() == oldRefName {
+			if err := st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, newRefName)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

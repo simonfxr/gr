@@ -14,8 +14,9 @@ import (
 
 // Top-level CLI
 type Args struct {
-	Chdir string `arg:"-C,--chdir" help:"path to repo (like git -C DIR)"`
-	PR    *PRCmd `arg:"subcommand:pr" help:"pull request commands"`
+	Chdir  string     `arg:"-C,--chdir" help:"path to repo (like git -C DIR)"`
+	PR     *PRCmd     `arg:"subcommand:pr" help:"pull request commands"`
+	Branch *BranchCmd `arg:"subcommand:branch" help:"branch commands"`
 }
 
 // `gr pr` group and its subcommands (stubs for now)
@@ -80,10 +81,52 @@ func main() {
 		runPR(args.PR, info)
 		return
 	}
+	if args.Branch != nil {
+		runBranch(args.Branch, info)
+		return
+	}
 
 	// No subcommand provided: print error and exit 1
 	fmt.Fprintln(os.Stderr, "Error: no command provided. Try 'gr pr list' or 'gr --help'.")
 	os.Exit(1)
+}
+
+// Branch command group
+type BranchCmd struct {
+	Rename *BranchRenameCmd `arg:"subcommand:rename" help:"rename a branch locally/remotely"`
+}
+
+type BranchRenameCmd struct {
+    Old       string `arg:"positional,required" help:"old branch name"`
+    New       string `arg:"positional,required" help:"new branch name"`
+    LocalOnly  bool `arg:"--local-only" help:"rename only locally, do not touch remote"`
+    NoUpdatePRs bool `arg:"--no-update-prs" help:"do not retarget open PRs/MRs to new branch name"`
+}
+
+func runBranch(cmd *BranchCmd, info *provider.Info) {
+	switch {
+	case cmd.Rename != nil:
+		if cmd.Rename.LocalOnly {
+			if err := provider.LocalBranchRename(cmd.Rename.Old, cmd.Rename.New); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return
+			}
+			fmt.Printf("Renamed local branch %q -> %q.\n", cmd.Rename.Old, cmd.Rename.New)
+			return
+		}
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+        if err := info.Provider.BranchRename(ctx, info, cmd.Rename.Old, cmd.Rename.New, provider.BranchRenameOptions{NoUpdatePRs: cmd.Rename.NoUpdatePRs}); err != nil {
+            fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+            return
+        }
+		fmt.Printf("Renamed remote branch %q -> %q.\n", cmd.Rename.Old, cmd.Rename.New)
+	default:
+		fmt.Println("'gr branch' requires a subcommand. Try 'gr branch rename'.")
+	}
 }
 
 func runPR(cmd *PRCmd, info *provider.Info) {

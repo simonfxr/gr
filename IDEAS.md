@@ -1,21 +1,10 @@
 # Some ideas on how the gr command should work
 
-## Pull requests:
-
-- `gr pr list`
-
-List pull requests
-
-- `gr pr create [--title=TITLE] [--body=BODY] [--base=BASE_BRANCH] [--draft] [--head=BRANCH]`
-
-Create a new pull request (by default for the currently checked out feature branch).
-Fails if there is already an existing PR for the branch.
-
 ## CLI COMMANDS
 
 ### Pull Request Commands
 
-#### `gr pr list [OPTIONS]`
+#### ✅ `gr pr list [OPTIONS]`
 
 List pull requests for the current repository.
 
@@ -35,7 +24,7 @@ gr pr list --author=myuser          # List PRs by specific author
 gr pr list --base=main --state=open # List open PRs targeting main branch
 ```
 
-#### `gr pr create [OPTIONS]`
+#### ✅ `gr pr create [OPTIONS]`
 
 Create a new pull request for the current branch.
 
@@ -55,7 +44,7 @@ gr pr create --draft --base=develop            # Create draft PR targeting devel
 gr pr create --title="Feature" --body="Desc"  # Create PR with title and body
 ```
 
-#### `gr pr view <PR_NUMBER>`
+#### ✅ `gr pr view <PR_NUMBER>`
 
 View details of a specific pull request.
 
@@ -73,7 +62,7 @@ Checkout the branch for a specific pull request locally.
 gr pr checkout 123                  # Checkout PR #123 branch
 ```
 
-#### `gr pr merge <PR_NUMBER> [OPTIONS]`
+#### ✅ `gr pr merge <PR_NUMBER> [OPTIONS]`
 
 Merge a pull request.
 
@@ -87,7 +76,7 @@ gr pr merge 123                     # Merge PR #123
 gr pr merge 123 --method=squash     # Squash merge PR #123
 ```
 
-#### `gr pr close <PR_NUMBER>`
+#### ✅ `gr pr close <PR_NUMBER>`
 
 Close a pull request without merging.
 
@@ -95,6 +84,69 @@ Close a pull request without merging.
 ```bash
 gr pr close 123                     # Close PR #123
 ```
+
+### Branch Commands
+
+#### `gr branch list [OPTIONS]`
+
+List branches for the current repository.
+
+**Options:**
+- `--remote` - Show remote branches only
+- `--local` - Show local branches only (default: show both)
+- `--merged` - Show only branches merged into current branch
+- `--no-merged` - Show only branches not merged into current branch
+- `--pattern=PATTERN` - Filter branches by glob pattern
+- `--sort=FIELD` - Sort by: `name` (default), `date`, `author`
+
+**Examples:**
+```bash
+gr branch list                      # List all branches
+gr branch list --remote             # List remote branches only
+gr branch list --no-merged          # List unmerged branches
+gr branch list --pattern="feature/*" # List feature branches
+```
+
+#### `gr branch delete <BRANCH_NAME> [OPTIONS]`
+
+Delete a branch both locally and remotely.
+
+**Options:**
+- `--force` - Force delete even if not merged
+- `--local-only` - Delete local branch only, keep remote
+- `--remote-only` - Delete remote branch only, keep local
+- `--dry-run` - Show what would be deleted without doing it
+- `--yes` - Skip confirmation prompts
+
+**Examples:**
+```bash
+gr branch delete feature/old-feature     # Delete branch locally and remotely
+gr branch delete feature/test --force    # Force delete unmerged branch
+gr branch delete feature/temp --local-only # Delete local branch only
+gr branch delete --dry-run feature/*     # Preview what would be deleted
+```
+
+#### ✅ `gr branch rename <OLD_NAME> <NEW_NAME> [OPTIONS]`
+
+Rename a branch using forge API calls to rename the actual remote branch.
+
+**Options:**
+- `--local-only` - Rename local branch only, don't update remote
+- `--no-update-prs` - Do not retarget open PRs/MRs to the new branch name
+- `--yes` - Skip confirmation prompts
+
+**Examples:**
+```bash
+gr branch rename old-name new-name          # Rename branch locally and remotely
+gr branch rename feature/old feature/new   # Rename with path structure
+gr branch rename temp-branch final --local-only # Rename local branch only
+```
+
+**Note:** The `rename` command uses provider API calls (GitHub/GitLab/Bitbucket) to actually rename the remote branch, not just update local tracking. This operation will:
+- Rename the remote branch via API
+- Update local tracking branch
+- Update any open pull requests to reference the new branch name
+- Handle branch protection rules and access permissions
 
 ## Implementation notes
 
