@@ -95,6 +95,7 @@ func main() {
 type BranchCmd struct {
 	Rename *BranchRenameCmd `arg:"subcommand:rename" help:"rename a branch locally/remotely"`
 	Delete *BranchDeleteCmd `arg:"subcommand:delete" help:"delete a branch locally/remotely"`
+	List   *BranchListCmd   `arg:"subcommand:list" help:"list branches"`
 }
 
 type BranchRenameCmd struct {
@@ -110,6 +111,15 @@ type BranchDeleteCmd struct {
 	RemoteOnly bool   `arg:"--remote-only" help:"delete remote branch only"`
 	Force      bool   `arg:"--force" help:"force deletion (skip safety checks where supported)"`
 	DryRun     bool   `arg:"--dry-run" help:"show actions without performing them"`
+}
+
+type BranchListCmd struct {
+	Remote   bool   `arg:"--remote" help:"show remote branches only"`
+	Local    bool   `arg:"--local" help:"show local branches only"`
+	Merged   bool   `arg:"--merged" help:"show only branches merged into current branch (local only)"`
+	NoMerged bool   `arg:"--no-merged" help:"show only branches not merged into current branch (local only)"`
+	Pattern  string `arg:"--pattern" help:"filter branches by glob pattern (e.g., feature/*)"`
+	Sort     string `arg:"--sort" help:"sort by: name (default), date, author"`
 }
 
 func runBranch(cmd *BranchCmd, info *provider.Info) {
@@ -188,6 +198,59 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 			return
 		}
 		fmt.Printf("Deleted remote and local branch %q.\n", d.Name)
+	case cmd.List != nil:
+		l := cmd.List
+		// Determine modes
+		onlyLocal := l.Local && !l.Remote
+		onlyRemote := l.Remote && !l.Local
+		showLocal := onlyLocal || (!l.Local && !l.Remote)
+		showRemote := onlyRemote || (!l.Local && !l.Remote)
+
+		if showLocal {
+			rows, err := provider.ListLocalBranches(provider.LocalBranchListOptions{
+				Pattern:  l.Pattern,
+				Sort:     l.Sort,
+				Merged:   l.Merged,
+				NoMerged: l.NoMerged,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return
+			}
+			if !showRemote {
+				for _, b := range rows {
+					fmt.Println(b.Name)
+				}
+			} else {
+				fmt.Println("Local branches:")
+				for _, b := range rows {
+					fmt.Printf("  %s\n", b.Name)
+				}
+			}
+		}
+
+		if showRemote {
+			if info == nil {
+				fmt.Println("Cannot detect provider/repo info for remote branches; skipping remote list")
+				return
+			}
+			ctx := context.Background()
+			rows, err := info.Provider.BranchListRemote(ctx, info, provider.BranchListOptions{Pattern: l.Pattern, Sort: l.Sort})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return
+			}
+			if !showLocal {
+				for _, b := range rows {
+					fmt.Println(b.Name)
+				}
+			} else {
+				fmt.Println("Remote branches:")
+				for _, b := range rows {
+					fmt.Printf("  %s\n", b.Name)
+				}
+			}
+		}
 	default:
 		fmt.Println("'gr branch' requires a subcommand. Try 'gr branch rename'.")
 	}

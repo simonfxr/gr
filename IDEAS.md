@@ -87,15 +87,15 @@ gr pr close 123                     # Close PR #123
 
 ### Branch Commands
 
-#### `gr branch list [OPTIONS]`
+#### ✅ `gr branch list [OPTIONS]`
 
 List branches for the current repository.
 
 **Options:**
 - `--remote` - Show remote branches only
 - `--local` - Show local branches only (default: show both)
-- `--merged` - Show only branches merged into current branch
-- `--no-merged` - Show only branches not merged into current branch
+- `--merged` - Show only branches merged into current branch (local only)
+- `--no-merged` - Show only branches not merged into current branch (local only)
 - `--pattern=PATTERN` - Filter branches by glob pattern
 - `--sort=FIELD` - Sort by: `name` (default), `date`, `author`
 

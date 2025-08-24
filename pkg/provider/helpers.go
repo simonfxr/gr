@@ -16,22 +16,27 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// githubClient returns an authenticated GitHub client.
-// Supports both github.com and GitHub Enterprise when Info indicates self-hosted.
+// githubClient returns a GitHub client. If GITHUB_TOKEN is set it authenticates
+// requests; otherwise it returns an unauthenticated client so that read-only
+// endpoints can still be used. Supports both github.com and GitHub Enterprise
+// when Info indicates self-hosted.
 func githubClient(ctx context.Context, nfo *Info) (*githublib.Client, error) {
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
-	if token == "" {
-		return nil, errors.New("GITHUB_TOKEN not set")
+	var httpClient *http.Client
+	if token != "" {
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+		httpClient = oauth2.NewClient(ctx, ts)
+	} else {
+		// unauthenticated client for public or low-scope endpoints
+		httpClient = nil // go-github will use http.DefaultClient
 	}
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	tc := oauth2.NewClient(ctx, ts)
 
 	if nfo != nil && nfo.Provider == ProviderGitHub && nfo.Variant == "self-hosted" && nfo.HTTPBase != "" {
 		base := strings.TrimRight(nfo.HTTPBase, "/") + "/api/v3/"
 		// For our usage, the REST and upload URLs are the same base.
-		return githublib.NewEnterpriseClient(base, base, tc)
+		return githublib.NewEnterpriseClient(base, base, httpClient)
 	}
-	return githublib.NewClient(tc), nil
+	return githublib.NewClient(httpClient), nil
 }
 
 // gitlabClient returns an authenticated GitLab client, respecting self-hosted base URL when available.
