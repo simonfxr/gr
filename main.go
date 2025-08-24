@@ -200,7 +200,21 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 		}
 		fmt.Printf("PR #%d %s.\n", cmd.Merge.Number, state)
 	case cmd.Close != nil:
-		fmt.Printf("[stub] pr close #%d\n", cmd.Close.Number)
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		res, err := info.Provider.PrClose(ctx, info, cmd.Close.Number)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		state := "closed"
+		if res != nil && res.State != "" {
+			state = res.State
+		}
+		fmt.Printf("PR #%d %s.\n", cmd.Close.Number, state)
 	default:
 		fmt.Println("'gr pr' requires a subcommand. Try 'gr pr list'.")
 	}

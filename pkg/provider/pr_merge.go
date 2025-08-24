@@ -41,7 +41,7 @@ func prMergeGitHub(ctx context.Context, nfo *Info, number int, opts MergeOptions
 		return nil, err
 	}
 	// Fetch PR to get head/base info for possible branch deletion
-	pr, _, err := gh.PullRequests.Get(ctx, nfo.Owner, nfo.Repo, number)
+	_, _, err = gh.PullRequests.Get(ctx, nfo.Owner, nfo.Repo, number)
 	if err != nil {
 		return nil, err
 	}
