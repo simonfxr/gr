@@ -9,9 +9,6 @@ import (
 	"strings"
 	"time"
 
-	git "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	githublib "github.com/google/go-github/v74/github"
 	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
@@ -169,102 +166,4 @@ func sortBranches(in []BranchInfo, opts BranchListOptions) []BranchInfo {
 		sort.SliceStable(in, func(i, j int) bool { return strings.ToLower(in[i].Name) < strings.ToLower(in[j].Name) })
 	}
 	return in
-}
-
-type LocalBranchListOptions struct {
-	Pattern  string
-	Sort     string // name|date|author
-	Merged   bool
-	NoMerged bool
-}
-
-// ListLocalBranches lists local branches from the repository in cwd.
-func ListLocalBranches(opts LocalBranchListOptions) ([]BranchInfo, error) {
-	root, err := FindRepoRoot("")
-	if err != nil {
-		return nil, err
-	}
-	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
-	if err != nil {
-		return nil, err
-	}
-	headRef, err := repo.Head()
-	if err != nil {
-		return nil, err
-	}
-	headHash := headRef.Hash()
-
-	var out []BranchInfo
-	iter, err := repo.References()
-	if err != nil {
-		return nil, err
-	}
-	defer iter.Close()
-	err = iter.ForEach(func(ref *plumbing.Reference) error {
-		if !ref.Name().IsBranch() {
-			return nil
-		}
-		name := ref.Name().Short()
-		if p := strings.TrimSpace(opts.Pattern); p != "" {
-			if ok, _ := path.Match(p, name); !ok {
-				return nil
-			}
-		}
-		// Determine merged state if requested
-		if opts.Merged || opts.NoMerged {
-			merged, _ := isAncestor(repo, ref.Hash(), headHash)
-			if opts.Merged && !merged {
-				return nil
-			}
-			if opts.NoMerged && merged {
-				return nil
-			}
-		}
-		// Fetch commit for date/author
-		ci, err := repo.CommitObject(ref.Hash())
-		var date time.Time
-		author := ""
-		if err == nil && ci != nil {
-			date = ci.Author.When
-			author = ci.Author.Name
-			// keep object import
-			_ = object.Commit{}
-		}
-		out = append(out, BranchInfo{Name: name, CommitDate: date, Author: author})
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return sortBranches(out, BranchListOptions{Pattern: "", Sort: opts.Sort}), nil
-}
-
-// isAncestor reports whether ancestor is reachable from descendant by walking parents.
-func isAncestor(repo *git.Repository, ancestor, descendant plumbing.Hash) (bool, error) {
-	if ancestor == descendant {
-		return true, nil
-	}
-	seen := map[plumbing.Hash]bool{}
-	queue := []plumbing.Hash{descendant}
-	for len(queue) > 0 {
-		h := queue[0]
-		queue = queue[1:]
-		if seen[h] {
-			continue
-		}
-		seen[h] = true
-		if h == ancestor {
-			return true, nil
-		}
-		c, err := repo.CommitObject(h)
-		if err != nil {
-			continue
-		}
-		for _, p := range c.ParentHashes {
-			if !seen[p] {
-				queue = append(queue, p)
-			}
-		}
-	}
-	return false, nil
 }

@@ -89,22 +89,19 @@ gr pr close 123                     # Close PR #123
 
 #### ✅ `gr branch list [OPTIONS]`
 
-List branches for the current repository.
+List remote branches for the current repository via provider APIs.
 
 **Options:**
-- `--remote` - Show remote branches only
-- `--local` - Show local branches only (default: show both)
-- `--merged` - Show only branches merged into current branch (local only)
-- `--no-merged` - Show only branches not merged into current branch (local only)
 - `--pattern=PATTERN` - Filter branches by glob pattern
 - `--sort=FIELD` - Sort by: `name` (default), `date`, `author`
+- `--json` - Output as JSON
 
 **Examples:**
 ```bash
-gr branch list                      # List all branches
-gr branch list --remote             # List remote branches only
-gr branch list --no-merged          # List unmerged branches
-gr branch list --pattern="feature/*" # List feature branches
+gr branch list                             # List remote branches
+gr branch list --pattern="feature/*"       # List feature branches
+gr branch list --sort=date                 # Sort by last commit date
+gr branch list --json                      # JSON output
 ```
 
 #### ✅ `gr branch delete <BRANCH_NAME> [OPTIONS]`

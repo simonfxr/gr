@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -36,6 +37,7 @@ type PRListCmd struct {
 	Base     string `arg:"--base" help:"filter by base branch"`
 	Head     string `arg:"--head" help:"filter by head branch"`
 	Limit    int    `arg:"--limit" help:"limit number of results" default:"30"`
+	JSON     bool   `arg:"--json" help:"output as JSON"`
 }
 
 type PRCreateCmd struct {
@@ -46,10 +48,12 @@ type PRCreateCmd struct {
 	Draft              bool   `arg:"--draft" help:"create as draft PR"`
 	NoEdit             bool   `arg:"--no-edit" help:"skip interactive editing"`
 	NoDeleteAfterMerge bool   `arg:"--no-delete-after-merge" help:"keep source branch after merge (default: delete)"`
+	JSON               bool   `arg:"--json" help:"output as JSON"`
 }
 
 type PRViewCmd struct {
-	Number int `arg:"positional,required" help:"pull request number"`
+	Number int  `arg:"positional,required" help:"pull request number"`
+	JSON   bool `arg:"--json" help:"output as JSON"`
 }
 
 type PRCheckoutCmd struct {
@@ -60,10 +64,12 @@ type PRMergeCmd struct {
 	Number       int    `arg:"positional,required" help:"pull request number"`
 	Method       string `arg:"--method" help:"merge method: merge|squash|rebase"`
 	DeleteBranch bool   `arg:"--delete-branch" help:"delete source branch after merge"`
+	JSON         bool   `arg:"--json" help:"output as JSON"`
 }
 
 type PRCloseCmd struct {
-	Number int `arg:"positional,required" help:"pull request number"`
+	Number int  `arg:"positional,required" help:"pull request number"`
+	JSON   bool `arg:"--json" help:"output as JSON"`
 }
 
 func (Args) Description() string {
@@ -115,12 +121,9 @@ type BranchDeleteCmd struct {
 }
 
 type BranchListCmd struct {
-	Remote   bool   `arg:"--remote" help:"show remote branches only"`
-	Local    bool   `arg:"--local" help:"show local branches only"`
-	Merged   bool   `arg:"--merged" help:"show only branches merged into current branch (local only)"`
-	NoMerged bool   `arg:"--no-merged" help:"show only branches not merged into current branch (local only)"`
-	Pattern  string `arg:"--pattern" help:"filter branches by glob pattern (e.g., feature/*)"`
-	Sort     string `arg:"--sort" help:"sort by: name (default), date, author"`
+	Pattern string `arg:"--pattern" help:"filter branches by glob pattern (e.g., feature/*)"`
+	Sort    string `arg:"--sort" help:"sort by: name (default), date, author"`
+	JSON    bool   `arg:"--json" help:"output as JSON"`
 }
 
 func runBranch(cmd *BranchCmd, info *provider.Info) {
@@ -203,56 +206,23 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 		fmt.Printf("Deleted remote and local branch %q.\n", d.Name)
 	case cmd.List != nil:
 		l := cmd.List
-		// Determine modes
-		onlyLocal := l.Local && !l.Remote
-		onlyRemote := l.Remote && !l.Local
-		showLocal := onlyLocal || (!l.Local && !l.Remote)
-		showRemote := onlyRemote || (!l.Local && !l.Remote)
-
-		if showLocal {
-			rows, err := provider.ListLocalBranches(provider.LocalBranchListOptions{
-				Pattern:  l.Pattern,
-				Sort:     l.Sort,
-				Merged:   l.Merged,
-				NoMerged: l.NoMerged,
-			})
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				return
-			}
-			if !showRemote {
-				for _, b := range rows {
-					fmt.Println(b.Name)
-				}
-			} else {
-				fmt.Println("Local branches:")
-				for _, b := range rows {
-					fmt.Printf("  %s\n", b.Name)
-				}
-			}
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
 		}
-
-		if showRemote {
-			if info == nil {
-				fmt.Println("Cannot detect provider/repo info for remote branches; skipping remote list")
-				return
-			}
-			ctx := context.Background()
-			rows, err := info.Provider.BranchListRemote(ctx, info, provider.BranchListOptions{Pattern: l.Pattern, Sort: l.Sort})
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				return
-			}
-			if !showLocal {
-				for _, b := range rows {
-					fmt.Println(b.Name)
-				}
-			} else {
-				fmt.Println("Remote branches:")
-				for _, b := range rows {
-					fmt.Printf("  %s\n", b.Name)
-				}
-			}
+		ctx := context.Background()
+		rows, err := info.Provider.BranchListRemote(ctx, info, provider.BranchListOptions{Pattern: l.Pattern, Sort: l.Sort})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		if l.JSON {
+			b, _ := json.MarshalIndent(rows, "", "  ")
+			fmt.Println(string(b))
+			return
+		}
+		for _, b := range rows {
+			fmt.Println(b.Name)
 		}
 	default:
 		fmt.Println("'gr branch' requires a subcommand. Try 'gr branch rename'.")
@@ -278,6 +248,11 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 		rows, err := info.Provider.PrList(ctx, info, opts)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		if cmd.List.JSON {
+			b, _ := json.MarshalIndent(rows, "", "  ")
+			fmt.Println(string(b))
 			return
 		}
 		if len(rows) == 0 {
@@ -312,7 +287,12 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return
 		}
-		fmt.Printf("Created PR #%d: %s\n", res.Number, res.URL)
+		if cmd.Create.JSON {
+			b, _ := json.MarshalIndent(res, "", "  ")
+			fmt.Println(string(b))
+		} else {
+			fmt.Printf("Created PR #%d: %s\n", res.Number, res.URL)
+		}
 	case cmd.View != nil:
 		if info == nil {
 			fmt.Println("Cannot detect provider/repo info; aborting")
@@ -322,6 +302,11 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 		d, err := info.Provider.PrView(ctx, info, cmd.View.Number)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		if cmd.View.JSON {
+			b, _ := json.MarshalIndent(d, "", "  ")
+			fmt.Println(string(b))
 			return
 		}
 		// Print details
@@ -367,11 +352,16 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return
 		}
-		state := "merged"
-		if res != nil && res.State != "" {
-			state = res.State
+		if cmd.Merge.JSON {
+			b, _ := json.MarshalIndent(res, "", "  ")
+			fmt.Println(string(b))
+		} else {
+			state := "merged"
+			if res != nil && res.State != "" {
+				state = res.State
+			}
+			fmt.Printf("PR #%d %s.\n", cmd.Merge.Number, state)
 		}
-		fmt.Printf("PR #%d %s.\n", cmd.Merge.Number, state)
 	case cmd.Close != nil:
 		if info == nil {
 			fmt.Println("Cannot detect provider/repo info; aborting")
@@ -383,11 +373,16 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return
 		}
-		state := "closed"
-		if res != nil && res.State != "" {
-			state = res.State
+		if cmd.Close.JSON {
+			b, _ := json.MarshalIndent(res, "", "  ")
+			fmt.Println(string(b))
+		} else {
+			state := "closed"
+			if res != nil && res.State != "" {
+				state = res.State
+			}
+			fmt.Printf("PR #%d %s.\n", cmd.Close.Number, state)
 		}
-		fmt.Printf("PR #%d %s.\n", cmd.Close.Number, state)
 	default:
 		fmt.Println("'gr pr' requires a subcommand. Try 'gr pr list'.")
 	}
