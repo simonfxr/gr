@@ -222,8 +222,26 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 			fmt.Println(string(b))
 			return
 		}
+		if len(rows) == 0 {
+			fmt.Println("No branches found.")
+			return
+		}
+		// Print a simple table: Name, Author, Latest Commit
+		fmt.Printf("%-40s  %-16s  %-20s\n", "Name", "Author", "Latest Commit")
 		for _, b := range rows {
-			fmt.Println(b.Name)
+			name := b.Name
+			if len(name) > 40 {
+				name = name[:37] + "..."
+			}
+			author := b.Author
+			if len(author) > 16 {
+				author = author[:16]
+			}
+			date := ""
+			if !b.CommitDate.IsZero() {
+				date = b.CommitDate.Format(time.RFC3339)[:19]
+			}
+			fmt.Printf("%-40s  %-16s  %-20s\n", name, author, date)
 		}
 	default:
 		fmt.Println("'gr branch' requires a subcommand. Try 'gr branch rename'.")

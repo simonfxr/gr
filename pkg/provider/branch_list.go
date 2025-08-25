@@ -48,7 +48,11 @@ func branchListRemoteGitHub(ctx context.Context, nfo *Info, opts BranchListOptio
 		return nil, err
 	}
 	listOpts := &githublib.BranchListOptions{ListOptions: githublib.ListOptions{PerPage: 100, Page: 1}}
-	var out []BranchInfo
+	type stub struct {
+		name string
+		sha  string
+	}
+	var stubs []stub
 	for {
 		branches, resp, err := gh.Repositories.ListBranches(ctx, nfo.Owner, nfo.Repo, listOpts)
 		if err != nil {
@@ -56,27 +60,44 @@ func branchListRemoteGitHub(ctx context.Context, nfo *Info, opts BranchListOptio
 		}
 		for _, b := range branches {
 			name := b.GetName()
-			info := BranchInfo{Name: name}
+			s := stub{name: name}
 			if b.Commit != nil {
-				sha := b.Commit.GetSHA()
-				if sha != "" {
-					// Fetch commit for date/author; ignore errors to keep listing responsive
-					if gc, _, err := gh.Git.GetCommit(ctx, nfo.Owner, nfo.Repo, sha); err == nil && gc != nil && gc.Author != nil {
-						if gc.Author.Date != nil {
-							info.CommitDate = gc.Author.Date.Time
-						}
-						info.Author = gc.Author.GetName()
-					}
-				}
+				s.sha = b.Commit.GetSHA()
 			}
-			out = append(out, info)
+			stubs = append(stubs, s)
 		}
 		if resp.NextPage == 0 {
 			break
 		}
 		listOpts.ListOptions.Page = resp.NextPage
 	}
-	return sortBranches(out, opts), nil
+	// If a pattern is provided, pre-filter to avoid unnecessary API calls.
+	if p := strings.TrimSpace(opts.Pattern); p != "" {
+		filtered := make([]stub, 0, len(stubs))
+		for _, s := range stubs {
+			if ok, _ := path.Match(p, s.name); ok {
+				filtered = append(filtered, s)
+			}
+		}
+		stubs = filtered
+	}
+
+	// Fetch commit info in parallel; ignore individual errors to keep listing responsive.
+	infos, _ := ParallelMapValues(stubs, func(s stub) (BranchInfo, error) {
+		info := BranchInfo{Name: s.name}
+		if s.sha == "" {
+			return info, nil
+		}
+		if gc, _, err := gh.Git.GetCommit(ctx, nfo.Owner, nfo.Repo, s.sha); err == nil && gc != nil && gc.Author != nil {
+			if gc.Author.Date != nil {
+				info.CommitDate = gc.Author.Date.Time
+			}
+			info.Author = gc.Author.GetName()
+		}
+		return info, nil
+	})
+
+	return sortBranches(infos, opts), nil
 }
 
 func branchListRemoteGitLab(ctx context.Context, nfo *Info, opts BranchListOptions) ([]BranchInfo, error) {
