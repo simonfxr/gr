@@ -68,8 +68,9 @@ type PRMergeCmd struct {
 }
 
 type PRCloseCmd struct {
-	Number int  `arg:"positional,required" help:"pull request number"`
-	JSON   bool `arg:"--json" help:"output as JSON"`
+	Number       int  `arg:"positional,required" help:"pull request number"`
+	DeleteBranch bool `arg:"--delete-branch" help:"delete source branch after closing"`
+	JSON         bool `arg:"--json" help:"output as JSON"`
 }
 
 func (Args) Description() string {
@@ -373,6 +374,12 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return
 		}
+		// Optionally delete the source branch after close (best-effort)
+		if cmd.Close.DeleteBranch && res != nil && strings.TrimSpace(res.Head) != "" {
+			if err := info.Provider.BranchDelete(ctx, info, res.Head, provider.BranchDeleteOptions{Force: false}); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to delete branch %q: %v\n", res.Head, err)
+			}
+		}
 		if cmd.Close.JSON {
 			b, _ := json.MarshalIndent(res, "", "  ")
 			fmt.Println(string(b))
@@ -382,6 +389,9 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 				state = res.State
 			}
 			fmt.Printf("PR #%d %s.\n", cmd.Close.Number, state)
+			if cmd.Close.DeleteBranch && res != nil && strings.TrimSpace(res.Head) != "" {
+				fmt.Printf("Deleted remote branch %q.\n", res.Head)
+			}
 		}
 	default:
 		fmt.Println("'gr pr' requires a subcommand. Try 'gr pr list'.")

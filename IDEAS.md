@@ -76,13 +76,18 @@ gr pr merge 123                     # Merge PR #123
 gr pr merge 123 --method=squash     # Squash merge PR #123
 ```
 
-#### ✅ `gr pr close <PR_NUMBER>`
+#### ✅ `gr pr close <PR_NUMBER> [OPTIONS]`
 
 Close a pull request without merging.
 
+**Options:**
+- `--delete-branch` - Delete the source branch after closing
+- `--json` - Output as JSON
+
 **Examples:**
 ```bash
-gr pr close 123                     # Close PR #123
+gr pr close 123                      # Close PR #123
+gr pr close 123 --delete-branch      # Close and delete source branch
 ```
 
 ### Branch Commands
