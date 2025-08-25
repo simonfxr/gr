@@ -103,6 +103,7 @@ type BranchRenameCmd struct {
 	New         string `arg:"positional,required" help:"new branch name"`
 	LocalOnly   bool   `arg:"--local-only" help:"rename only locally, do not touch remote"`
 	NoUpdatePRs bool   `arg:"--no-update-prs" help:"do not retarget open PRs/MRs to new branch name"`
+	Force       bool   `arg:"--force" help:"proceed even if open MRs use the source branch (GitLab). Equivalent to --no-update-prs; may orphan MR source branches."`
 }
 
 type BranchDeleteCmd struct {
@@ -138,7 +139,9 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 			return
 		}
 		ctx := context.Background()
-		if err := info.Provider.BranchRename(ctx, info, cmd.Rename.Old, cmd.Rename.New, provider.BranchRenameOptions{NoUpdatePRs: cmd.Rename.NoUpdatePRs}); err != nil {
+		// --force is an alias for skipping MR updates/safety checks on providers
+		// where updating MR source branch is not supported (e.g., GitLab).
+		if err := info.Provider.BranchRename(ctx, info, cmd.Rename.Old, cmd.Rename.New, provider.BranchRenameOptions{NoUpdatePRs: cmd.Rename.NoUpdatePRs || cmd.Rename.Force}); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return
 		}

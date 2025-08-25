@@ -2,8 +2,6 @@ module github.com/simonfxr/gr
 
 go 1.24
 
-toolchain go1.24.6
-
 require (
 	github.com/alexflint/go-arg v1.6.0
 	github.com/go-git/go-git/v5 v5.16.2

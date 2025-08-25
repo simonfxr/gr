@@ -49,14 +49,17 @@ func branchRenameGitLab(ctx context.Context, nfo *Info, oldName, newName string,
 	}
 	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
 
-	if !opts.NoUpdatePRs {
+	if opts.NoUpdatePRs {
 		// Block if any open MRs use oldName as source branch.
 		srcCount, err := countGitLabOpenMRs(gl, project, &oldName, nil)
 		if err != nil {
 			return err
 		}
 		if srcCount > 0 {
-			return fmt.Errorf("found %d open merge request(s) with source branch %q; cannot update MR source branch on GitLab. Close/merge or recreate them pointing to %q, then retry", srcCount, oldName, newName)
+			return fmt.Errorf(
+				"found %d open merge request(s) with source branch %q; GitLab does not support changing an MR's source branch. Close/merge or recreate them pointing to %q, then retry, or rerun with --no-update-prs/--force to proceed (will orphan MR source branches)",
+				srcCount, oldName, newName,
+			)
 		}
 	}
 
@@ -261,7 +264,13 @@ func countGitLabOpenMRs(gl *gitlab.Client, project string, sourceBranch, targetB
 	return total, nil
 }
 
-// retargetGitLabMRs updates open MRs targeting oldTarget to point to newTarget.
+// retargetGitLabMRs recreates open MRs targeting oldTarget so they target newTarget.
+//
+// We avoid using UpdateMergeRequest for changing target branches because in practice
+// it can be unreliable depending on project settings/permissions. Instead, we:
+//  1. Create a new MR by cloning fields from the old one but using target=newTarget
+//  2. Update the old MR's description to point to the new MR
+//  3. Close the old MR
 func retargetGitLabMRs(gl *gitlab.Client, project, oldTarget, newTarget string) error {
 	page := 1
 	perPage := 50
@@ -276,9 +285,28 @@ func retargetGitLabMRs(gl *gitlab.Client, project, oldTarget, newTarget string) 
 			return err
 		}
 		for _, mr := range mrs {
-			_, _, err := gl.MergeRequests.UpdateMergeRequest(project, mr.IID, &gitlab.UpdateMergeRequestOptions{TargetBranch: gitlab.Ptr(newTarget)})
+			// Step 1: Create a new MR cloning key fields but switching the target branch.
+			newMR, _, err := gl.MergeRequests.CreateMergeRequest(project, &gitlab.CreateMergeRequestOptions{
+				Title:        gitlab.Ptr(mr.Title),
+				SourceBranch: gitlab.Ptr(mr.SourceBranch),
+				TargetBranch: gitlab.Ptr(newTarget),
+				Description:  gitlab.Ptr(mr.Description),
+			})
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to create replacement MR for !%d: %w", mr.IID, err)
+			}
+
+			// Step 2: Update old MR description with superseded notice linking to new MR.
+			link := newMR.WebURL
+			notice := fmt.Sprintf("\n\nSuperseded by new MR here: %s", link)
+			newDesc := mr.Description + notice
+			if _, _, err := gl.MergeRequests.UpdateMergeRequest(project, mr.IID, &gitlab.UpdateMergeRequestOptions{Description: gitlab.Ptr(newDesc)}); err != nil {
+				return fmt.Errorf("failed to update description for old MR !%d: %w", mr.IID, err)
+			}
+
+			// Step 3: Close the old MR.
+			if _, _, err := gl.MergeRequests.UpdateMergeRequest(project, mr.IID, &gitlab.UpdateMergeRequestOptions{StateEvent: gitlab.Ptr("close")}); err != nil {
+				return fmt.Errorf("failed to close old MR !%d: %w", mr.IID, err)
 			}
 		}
 		if resp == nil || resp.NextPage == 0 || resp.CurrentPage >= resp.TotalPages {
