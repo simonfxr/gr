@@ -3,11 +3,12 @@ package tables
 import (
 	"encoding/csv"
 	"fmt"
+	"iter"
 	"os"
+	"slices"
 	"unicode/utf8"
 
 	"golang.org/x/term"
-	"iter"
 )
 
 // Render prints rows as a formatted table when stdout is a TTY.
@@ -31,9 +32,7 @@ func Render(columns []string, rowIter iter.Seq[[]string]) {
 	rows := make([][]string, 0, 64)
 	for r := range rowIter {
 		// Ensure we don't mutate caller's backing arrays later
-		cp := make([]string, len(r))
-		copy(cp, r)
-		rows = append(rows, cp)
+		rows = append(rows, slices.Clone(r))
 	}
 
 	// Derive widths and render
@@ -70,11 +69,11 @@ func printTable(ttyWidth int, headers []string, rows [][]string) {
 
 	// Desired width per column based on content
 	widths := make([]int, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		widths[i] = displayWidth(headers[i])
 	}
 	for _, r := range norm {
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if w := displayWidth(r[i]); w > widths[i] {
 				widths[i] = w
 			}
@@ -84,8 +83,8 @@ func printTable(ttyWidth int, headers []string, rows [][]string) {
 	// Cap very wide columns so table fits; then shrink if still overflowing.
 	// Start with soft caps to avoid a single column dominating.
 	minCol := 4
-	softCap := max(10, ttyWidth/3) // cap any single column around ~1/3 of width
-	for i := 0; i < n; i++ {
+	softCap := max(10, 2*ttyWidth/3) // cap any single column around ~1/3 of width
+	for i := range n {
 		if widths[i] > softCap {
 			widths[i] = softCap
 		}
@@ -100,7 +99,7 @@ func printTable(ttyWidth int, headers []string, rows [][]string) {
 		// Find the widest column that can still shrink
 		idx := -1
 		maxw := 0
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if widths[i] > minCol && widths[i] > maxw {
 				maxw = widths[i]
 				idx = i
@@ -114,7 +113,7 @@ func printTable(ttyWidth int, headers []string, rows [][]string) {
 	}
 
 	// Render header
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			fmt.Print(spaces(gap))
 		}
@@ -122,7 +121,7 @@ func printTable(ttyWidth int, headers []string, rows [][]string) {
 	}
 	fmt.Println()
 	// Separator
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i > 0 {
 			fmt.Print(spaces(gap))
 		}
@@ -132,7 +131,7 @@ func printTable(ttyWidth int, headers []string, rows [][]string) {
 
 	// Render rows
 	for _, r := range norm {
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if i > 0 {
 				fmt.Print(spaces(gap))
 			}
