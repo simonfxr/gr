@@ -123,9 +123,11 @@ type BranchDeleteCmd struct {
 }
 
 type BranchListCmd struct {
-	Pattern string `arg:"--pattern" help:"filter branches by glob pattern (e.g., feature/*)"`
-	Sort    string `arg:"--sort" help:"sort by: name (default), date, author"`
-	JSON    bool   `arg:"--json" help:"output as JSON"`
+    Pattern string `arg:"--pattern" help:"filter branches by glob pattern (e.g., feature/*)"`
+    Sort    string `arg:"--sort" help:"sort by: name (default), date, author"`
+    Author  string `arg:"--author" help:"filter by author (case-insensitive substring)"`
+    Since   string `arg:"--since" help:"filter by max age of last commit (e.g., 72h, 10d, 3w)"`
+    JSON    bool   `arg:"--json" help:"output as JSON"`
 }
 
 func runBranch(cmd *BranchCmd, info *provider.Info) {
@@ -213,11 +215,11 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 			return
 		}
 		ctx := context.Background()
-		rows, err := info.Provider.BranchListRemote(ctx, info, provider.BranchListOptions{Pattern: l.Pattern, Sort: l.Sort})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
+        rows, err := info.Provider.BranchListRemote(ctx, info, provider.BranchListOptions{Pattern: l.Pattern, Sort: l.Sort, Author: l.Author, Since: l.Since})
+        if err != nil {
+            fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+            return
+        }
 		if l.JSON {
 			b, _ := json.MarshalIndent(rows, "", "  ")
 			fmt.Println(string(b))

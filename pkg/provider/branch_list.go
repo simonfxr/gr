@@ -17,6 +17,8 @@ import (
 type BranchListOptions struct {
 	Pattern string
 	Sort    string // name|date|author
+	Author  string // case-insensitive substring match on author
+	Since   string // human duration like 72h, 10d, 3w
 }
 
 type BranchInfo struct {
@@ -177,6 +179,29 @@ func sortBranches(in []BranchInfo, opts BranchListOptions) []BranchInfo {
 		}
 		in = filtered
 	}
+	// Filter by author substring (case-insensitive)
+	if a := strings.ToLower(strings.TrimSpace(opts.Author)); a != "" {
+		filtered := make([]BranchInfo, 0, len(in))
+		for _, b := range in {
+			if strings.Contains(strings.ToLower(b.Author), a) {
+				filtered = append(filtered, b)
+			}
+		}
+		in = filtered
+	}
+	// Filter by max age since last commit
+	if s := strings.TrimSpace(opts.Since); s != "" {
+		if d, err := parseMaxAge(s); err == nil && d > 0 {
+			cutoff := time.Now().Add(-d)
+			filtered := make([]BranchInfo, 0, len(in))
+			for _, b := range in {
+				if !b.CommitDate.IsZero() && b.CommitDate.After(cutoff) {
+					filtered = append(filtered, b)
+				}
+			}
+			in = filtered
+		}
+	}
 	sortKey := strings.ToLower(strings.TrimSpace(opts.Sort))
 	switch sortKey {
 	case "date":
@@ -187,4 +212,90 @@ func sortBranches(in []BranchInfo, opts BranchListOptions) []BranchInfo {
 		sort.SliceStable(in, func(i, j int) bool { return strings.ToLower(in[i].Name) < strings.ToLower(in[j].Name) })
 	}
 	return in
+}
+
+// parseMaxAge parses human durations like "72h", "10d", "3w", or composites like "1w2d3h45m".
+// It supports Go's time.ParseDuration formats plus 'd' (days) and 'w' (weeks), and allows combining units.
+// Only integer values are supported for 'd' and 'w' parts.
+func parseMaxAge(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	// Try native parser first (supports sequences like 1h30m, but not d/w)
+	if d, err := time.ParseDuration(s); err == nil {
+		return d, nil
+	}
+	// Normalize and parse composite with additional units 'd' and 'w'
+	// Accept lowercase only
+	s = strings.ToLower(s)
+	// Allow microseconds in either 'us' or 'µs'
+	// We'll scan number+unit pairs repeatedly.
+	i := 0
+	total := time.Duration(0)
+	for i < len(s) {
+		// skip spaces
+		for i < len(s) && s[i] == ' ' {
+			i++
+		}
+		if i >= len(s) {
+			break
+		}
+		// parse integer value
+		if s[i] < '0' || s[i] > '9' {
+			return 0, fmt.Errorf("invalid duration at %q", s[i:])
+		}
+		val := int64(0)
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			val = val*10 + int64(s[i]-'0')
+			i++
+		}
+		if i >= len(s) {
+			return 0, fmt.Errorf("missing unit in duration: %q", s)
+		}
+		// detect unit (prefer two-letter units)
+		unit := ""
+		if i+2 <= len(s) {
+			u2 := s[i : i+2]
+			switch u2 {
+			case "ns", "us", "µs", "ms":
+				unit = u2
+				i += 2
+			}
+		}
+		if unit == "" {
+			// single-letter unit
+			u1 := s[i]
+			switch u1 {
+			case 's', 'm', 'h', 'd', 'w':
+				unit = string(u1)
+				i++
+			default:
+				return 0, fmt.Errorf("unsupported duration unit at %q", s[i:])
+			}
+		}
+		mult := time.Duration(0)
+		switch unit {
+		case "ns":
+			mult = time.Nanosecond
+		case "us", "µs":
+			mult = time.Microsecond
+		case "ms":
+			mult = time.Millisecond
+		case "s":
+			mult = time.Second
+		case "m":
+			mult = time.Minute
+		case "h":
+			mult = time.Hour
+		case "d":
+			mult = 24 * time.Hour
+		case "w":
+			mult = 7 * 24 * time.Hour
+		default:
+			return 0, fmt.Errorf("unsupported duration unit: %q", unit)
+		}
+		total += time.Duration(val) * mult
+	}
+	return total, nil
 }
