@@ -20,6 +20,7 @@ import (
 
 // Info contains parsed repository and provider details inferred from git remotes.
 type Info struct {
+	Root     string   // repository root directory (worktree), respects -C
 	Provider Provider // enum: github|gitlab|bitbucket|unknown
 	Variant  string   // cloud|self-hosted|unknown
 	Evidence string   // method used (e.g. api_v4_version, headers, url-heuristic)
@@ -73,6 +74,7 @@ func DetectFromRepo(dir string) (*Info, error) {
 	svc, variant, evidence, base := detectService(host, port)
 
 	return &Info{
+		Root:     root,
 		Provider: svc,
 		Variant:  variant,
 		Evidence: evidence,

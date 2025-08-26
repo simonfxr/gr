@@ -1,17 +1,12 @@
 package main
 
 import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "os"
-    "strings"
-    "time"
+	"fmt"
+	"os"
 
-    "github.com/alexflint/go-arg"
+	"github.com/alexflint/go-arg"
 
-    "github.com/simonfxr/gr/pkg/provider"
-    "github.com/simonfxr/gr/tables"
+	"github.com/simonfxr/gr/pkg/provider"
 )
 
 // Top-level CLI
@@ -47,6 +42,7 @@ type PRCreateCmd struct {
 	Base               string `arg:"--base" help:"target branch (default: repo default)"`
 	Head               string `arg:"--head" help:"source branch (default: current)"`
 	Draft              bool   `arg:"--draft" help:"create as draft PR"`
+	Edit               bool   `arg:"--edit" help:"open $VISUAL or $EDITOR to edit title/body (uses PR_EDITMSG in gitdir)"`
 	NoEdit             bool   `arg:"--no-edit" help:"skip interactive editing"`
 	NoDeleteAfterMerge bool   `arg:"--no-delete-after-merge" help:"keep source branch after merge (default: delete)"`
 	JSON               bool   `arg:"--json" help:"output as JSON"`
@@ -74,31 +70,6 @@ type PRCloseCmd struct {
 	JSON         bool `arg:"--json" help:"output as JSON"`
 }
 
-func (Args) Description() string {
-	return "gr - git remote PR helper (stubs)"
-}
-
-func main() {
-	args := &Args{}
-	arg.MustParse(args)
-
-	// Detect provider once for subcommands; stay quiet in normal operation
-	info, _ := provider.DetectFromRepo(args.Chdir)
-
-	if args.PR != nil {
-		runPR(args.PR, info)
-		return
-	}
-	if args.Branch != nil {
-		runBranch(args.Branch, info)
-		return
-	}
-
-	// No subcommand provided: print error and exit 1
-	fmt.Fprintln(os.Stderr, "Error: no command provided. Try 'gr pr list' or 'gr --help'.")
-	os.Exit(1)
-}
-
 // Branch command group
 type BranchCmd struct {
 	Rename *BranchRenameCmd `arg:"subcommand:rename" help:"rename a branch locally/remotely"`
@@ -123,295 +94,34 @@ type BranchDeleteCmd struct {
 }
 
 type BranchListCmd struct {
-    Pattern string `arg:"--pattern" help:"filter branches by glob pattern (e.g., feature/*)"`
-    Sort    string `arg:"--sort" help:"sort by: name (default), date, author"`
-    Author  string `arg:"--author" help:"filter by author (case-insensitive substring)"`
-    Since   string `arg:"--since" help:"filter by max age of last commit (e.g., 72h, 10d, 3w)"`
-    JSON    bool   `arg:"--json" help:"output as JSON"`
+	Pattern string `arg:"--pattern" help:"filter branches by glob pattern (e.g., feature/*)"`
+	Sort    string `arg:"--sort" help:"sort by: name (default), date, author"`
+	Author  string `arg:"--author" help:"filter by author (case-insensitive substring)"`
+	Since   string `arg:"--since" help:"filter by max age of last commit (e.g., 72h, 10d, 3w)"`
+	JSON    bool   `arg:"--json" help:"output as JSON"`
 }
 
-func runBranch(cmd *BranchCmd, info *provider.Info) {
-	switch {
-	case cmd.Rename != nil:
-		if cmd.Rename.LocalOnly {
-			if err := provider.LocalBranchRename(cmd.Rename.Old, cmd.Rename.New); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				return
-			}
-			fmt.Printf("Renamed local branch %q -> %q.\n", cmd.Rename.Old, cmd.Rename.New)
-			return
-		}
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		// --force is an alias for skipping MR updates/safety checks on providers
-		// where updating MR source branch is not supported (e.g., GitLab).
-		if err := info.Provider.BranchRename(ctx, info, cmd.Rename.Old, cmd.Rename.New, provider.BranchRenameOptions{NoUpdatePRs: cmd.Rename.NoUpdatePRs || cmd.Rename.Force}); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		fmt.Printf("Renamed remote branch %q -> %q.\n", cmd.Rename.Old, cmd.Rename.New)
-	case cmd.Delete != nil:
-		d := cmd.Delete
-		if d.DryRun {
-			// Describe what would happen
-			if d.LocalOnly {
-				fmt.Printf("[dry-run] Would delete local branch %q.\n", d.Name)
-				return
-			}
-			if d.RemoteOnly {
-				if info == nil {
-					fmt.Println("[dry-run] Cannot detect provider/repo info; aborting")
-					return
-				}
-				fmt.Printf("[dry-run] Would delete remote branch %q on %s/%s.\n", d.Name, info.Owner, info.Repo)
-				return
-			}
-			if info == nil {
-				fmt.Println("[dry-run] Cannot detect provider/repo info; aborting")
-				return
-			}
-			fmt.Printf("[dry-run] Would delete remote branch %q on %s/%s and local branch.\n", d.Name, info.Owner, info.Repo)
-			return
-		}
-		// Execute
-		if d.LocalOnly {
-			if err := provider.LocalBranchDelete(d.Name, d.Force); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				return
-			}
-			fmt.Printf("Deleted local branch %q.\n", d.Name)
-			return
-		}
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		if d.RemoteOnly {
-			if err := info.Provider.BranchDelete(ctx, info, d.Name, provider.BranchDeleteOptions{Force: d.Force}); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				return
-			}
-			fmt.Printf("Deleted remote branch %q.\n", d.Name)
-			return
-		}
-		// Both: remote then local
-		if err := info.Provider.BranchDelete(ctx, info, d.Name, provider.BranchDeleteOptions{Force: d.Force}); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if err := provider.LocalBranchDelete(d.Name, d.Force); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: remote deleted, but failed to delete local branch: %v\n", err)
-			return
-		}
-		fmt.Printf("Deleted remote and local branch %q.\n", d.Name)
-	case cmd.List != nil:
-		l := cmd.List
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-        rows, err := info.Provider.BranchListRemote(ctx, info, provider.BranchListOptions{Pattern: l.Pattern, Sort: l.Sort, Author: l.Author, Since: l.Since})
-        if err != nil {
-            fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-            return
-        }
-		if l.JSON {
-			b, _ := json.MarshalIndent(rows, "", "  ")
-			fmt.Println(string(b))
-			return
-		}
-        if len(rows) == 0 {
-            fmt.Println("No branches found.")
-            return
-        }
-        headers := []string{"Name", "Author", "Latest Commit"}
-        tables.Render(headers, func(yield func([]string) bool) {
-            for _, b := range rows {
-                date := ""
-                if !b.CommitDate.IsZero() {
-                    date = b.CommitDate.Format(time.RFC3339)[:19]
-                }
-                if !yield([]string{b.Name, b.Author, date}) {
-                    return
-                }
-            }
-        })
-	default:
-		fmt.Println("'gr branch' requires a subcommand. Try 'gr branch rename'.")
-	}
+func (Args) Description() string {
+	return "gr - git remote PR helper (stubs)"
 }
 
-func runPR(cmd *PRCmd, info *provider.Info) {
-	switch {
-	case cmd.List != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		opts := provider.ListOptions{
-			State:    cmd.List.State,
-			Author:   cmd.List.Author,
-			Assignee: cmd.List.Assignee,
-			Base:     cmd.List.Base,
-			Head:     cmd.List.Head,
-			Limit:    cmd.List.Limit,
-		}
-		rows, err := info.Provider.PrList(ctx, info, opts)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if cmd.List.JSON {
-			b, _ := json.MarshalIndent(rows, "", "  ")
-			fmt.Println(string(b))
-			return
-		}
-        if len(rows) == 0 {
-            fmt.Println("No pull requests found.")
-            return
-        }
-        headers := []string{"ID", "Title", "Author", "State", "Created"}
-        tables.Render(headers, func(yield func([]string) bool) {
-            for _, pr := range rows {
-                created := ""
-                if !pr.CreatedAt.IsZero() {
-                    created = pr.CreatedAt.Format(time.RFC3339)[:19]
-                }
-                if !yield([]string{fmt.Sprintf("#%d", pr.Number), pr.Title, pr.Author, pr.State, created}) {
-                    return
-                }
-            }
-        })
-	case cmd.Create != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		res, err := info.Provider.PrCreate(ctx, info, provider.CreateOptions{
-			Title:            cmd.Create.Title,
-			Body:             cmd.Create.Body,
-			Base:             cmd.Create.Base,
-			Head:             cmd.Create.Head,
-			Draft:            cmd.Create.Draft,
-			DeleteAfterMerge: !cmd.Create.NoDeleteAfterMerge,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if cmd.Create.JSON {
-			b, _ := json.MarshalIndent(res, "", "  ")
-			fmt.Println(string(b))
-		} else {
-			fmt.Printf("Created PR #%d: %s\n", res.Number, res.URL)
-		}
-	case cmd.View != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		d, err := info.Provider.PrView(ctx, info, cmd.View.Number)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if cmd.View.JSON {
-			b, _ := json.MarshalIndent(d, "", "  ")
-			fmt.Println(string(b))
-			return
-		}
-		// Print details
-		fmt.Printf("%s (#%d)\n", d.Title, d.Number)
-		fmt.Printf("Author:   %s\n", d.Author)
-		state := d.State
-		if d.Merged {
-			state = "merged"
-		}
-		fmt.Printf("State:    %s\n", state)
-		if d.Draft {
-			fmt.Printf("Draft:    %v\n", d.Draft)
-		}
-		if d.Head != "" || d.Base != "" {
-			fmt.Printf("Branch:   %s -> %s\n", d.Head, d.Base)
-		}
-		if !d.CreatedAt.IsZero() {
-			fmt.Printf("Created:  %s\n", d.CreatedAt.Format(time.RFC3339)[:19])
-		}
-		if !d.UpdatedAt.IsZero() {
-			fmt.Printf("Updated:  %s\n", d.UpdatedAt.Format(time.RFC3339)[:19])
-		}
-		if d.URL != "" {
-			fmt.Printf("URL:      %s\n", d.URL)
-		}
-		if strings.TrimSpace(d.Body) != "" {
-			fmt.Println()
-			fmt.Println(d.Body)
-		}
-	case cmd.Checkout != nil:
-		fmt.Printf("[stub] pr checkout #%d\n", cmd.Checkout.Number)
-	case cmd.Merge != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		res, err := info.Provider.PrMerge(ctx, info, cmd.Merge.Number, provider.MergeOptions{
-			Method:       cmd.Merge.Method,
-			DeleteBranch: cmd.Merge.DeleteBranch,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if cmd.Merge.JSON {
-			b, _ := json.MarshalIndent(res, "", "  ")
-			fmt.Println(string(b))
-		} else {
-			state := "merged"
-			if res != nil && res.State != "" {
-				state = res.State
-			}
-			fmt.Printf("PR #%d %s.\n", cmd.Merge.Number, state)
-		}
-	case cmd.Close != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		res, err := info.Provider.PrClose(ctx, info, cmd.Close.Number)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		// Optionally delete the source branch after close (best-effort)
-		if cmd.Close.DeleteBranch && res != nil && strings.TrimSpace(res.Head) != "" {
-			if err := info.Provider.BranchDelete(ctx, info, res.Head, provider.BranchDeleteOptions{Force: false}); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to delete branch %q: %v\n", res.Head, err)
-			}
-		}
-		if cmd.Close.JSON {
-			b, _ := json.MarshalIndent(res, "", "  ")
-			fmt.Println(string(b))
-		} else {
-			state := "closed"
-			if res != nil && res.State != "" {
-				state = res.State
-			}
-			fmt.Printf("PR #%d %s.\n", cmd.Close.Number, state)
-			if cmd.Close.DeleteBranch && res != nil && strings.TrimSpace(res.Head) != "" {
-				fmt.Printf("Deleted remote branch %q.\n", res.Head)
-			}
-		}
-	default:
-		fmt.Println("'gr pr' requires a subcommand. Try 'gr pr list'.")
+func main() {
+	args := &Args{}
+	arg.MustParse(args)
+
+	// Detect provider once for subcommands; stay quiet in normal operation
+	info, _ := provider.DetectFromRepo(args.Chdir)
+
+	if args.PR != nil {
+		runPR(args.PR, info)
+		return
 	}
+	if args.Branch != nil {
+		runBranch(args.Branch, info)
+		return
+	}
+
+	// No subcommand provided: print error and exit 1
+	fmt.Fprintln(os.Stderr, "Error: no command provided. Try 'gr pr list' or 'gr --help'.")
+	os.Exit(1)
 }

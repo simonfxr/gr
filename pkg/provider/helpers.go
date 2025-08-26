@@ -6,6 +6,7 @@ import (
 	"iter"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -167,6 +168,49 @@ func LastCommitTitle(nfo *Info) (string, error) {
 		msg = msg[:i]
 	}
 	return strings.TrimSpace(msg), nil
+}
+
+// GitDirPath returns the path to the repository's gitdir (the .git directory).
+// It supports both standard repos where .git is a directory and worktrees
+// where .git is a file pointing to the gitdir.
+func GitDirPath(dir string) (string, error) {
+	root, err := FindRepoRoot(dir)
+	if err != nil {
+		return "", err
+	}
+	dot := filepath.Join(root, ".git")
+	fi, err := os.Stat(dot)
+	if err != nil {
+		return "", err
+	}
+	if fi.IsDir() {
+		return dot, nil
+	}
+	// .git is a file, parse gitdir: <path>
+	b, err := os.ReadFile(dot)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(string(b), "\n")
+	for _, ln := range lines {
+		s := strings.TrimSpace(ln)
+		if s == "" {
+			continue
+		}
+		lower := strings.ToLower(s)
+		const prefix = "gitdir:"
+		if strings.HasPrefix(lower, prefix) {
+			p := strings.TrimSpace(s[len(prefix):])
+			if p == "" {
+				break
+			}
+			if !filepath.IsAbs(p) {
+				p = filepath.Join(root, p)
+			}
+			return p, nil
+		}
+	}
+	return "", errors.New("could not resolve gitdir from .git file")
 }
 
 // ResolvePRTitle ensures a non-empty title, using last commit subject when missing.
