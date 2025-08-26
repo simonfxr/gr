@@ -1,16 +1,17 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"strings"
-	"time"
+    "context"
+    "encoding/json"
+    "fmt"
+    "os"
+    "strings"
+    "time"
 
-	"github.com/alexflint/go-arg"
+    "github.com/alexflint/go-arg"
 
-	"github.com/simonfxr/gr/pkg/provider"
+    "github.com/simonfxr/gr/pkg/provider"
+    "github.com/simonfxr/gr/tables"
 )
 
 // Top-level CLI
@@ -222,27 +223,22 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 			fmt.Println(string(b))
 			return
 		}
-		if len(rows) == 0 {
-			fmt.Println("No branches found.")
-			return
-		}
-		// Print a simple table: Name, Author, Latest Commit
-		fmt.Printf("%-40s  %-16s  %-20s\n", "Name", "Author", "Latest Commit")
-		for _, b := range rows {
-			name := b.Name
-			if len(name) > 40 {
-				name = name[:37] + "..."
-			}
-			author := b.Author
-			if len(author) > 16 {
-				author = author[:16]
-			}
-			date := ""
-			if !b.CommitDate.IsZero() {
-				date = b.CommitDate.Format(time.RFC3339)[:19]
-			}
-			fmt.Printf("%-40s  %-16s  %-20s\n", name, author, date)
-		}
+        if len(rows) == 0 {
+            fmt.Println("No branches found.")
+            return
+        }
+        headers := []string{"Name", "Author", "Latest Commit"}
+        tables.Render(headers, func(yield func([]string) bool) {
+            for _, b := range rows {
+                date := ""
+                if !b.CommitDate.IsZero() {
+                    date = b.CommitDate.Format(time.RFC3339)[:19]
+                }
+                if !yield([]string{b.Name, b.Author, date}) {
+                    return
+                }
+            }
+        })
 	default:
 		fmt.Println("'gr branch' requires a subcommand. Try 'gr branch rename'.")
 	}
@@ -274,20 +270,22 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			fmt.Println(string(b))
 			return
 		}
-		if len(rows) == 0 {
-			fmt.Println("No pull requests found.")
-			return
-		}
-		// Print a simple table
-		fmt.Printf("%-6s  %-60s  %-12s  %-8s  %-20s\n", "ID", "Title", "Author", "State", "Created")
-		for _, pr := range rows {
-			title := pr.Title
-			if len(title) > 60 {
-				title = title[:57] + "..."
-			}
-			fmt.Printf("#%-5d  %-60s  %-12s  %-8s  %-20s\n",
-				pr.Number, title, pr.Author, pr.State, pr.CreatedAt.Format(time.RFC3339)[:19])
-		}
+        if len(rows) == 0 {
+            fmt.Println("No pull requests found.")
+            return
+        }
+        headers := []string{"ID", "Title", "Author", "State", "Created"}
+        tables.Render(headers, func(yield func([]string) bool) {
+            for _, pr := range rows {
+                created := ""
+                if !pr.CreatedAt.IsZero() {
+                    created = pr.CreatedAt.Format(time.RFC3339)[:19]
+                }
+                if !yield([]string{fmt.Sprintf("#%d", pr.Number), pr.Title, pr.Author, pr.State, created}) {
+                    return
+                }
+            }
+        })
 	case cmd.Create != nil:
 		if info == nil {
 			fmt.Println("Cannot detect provider/repo info; aborting")

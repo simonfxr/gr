@@ -9,6 +9,7 @@ require (
 	github.com/ktrysmt/go-bitbucket v0.9.86
 	gitlab.com/gitlab-org/api/client-go v0.142.0
 	golang.org/x/oauth2 v0.30.0
+	golang.org/x/term v0.31.0
 )
 
 require (
