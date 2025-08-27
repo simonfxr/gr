@@ -101,6 +101,71 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			fmt.Println()
 			fmt.Println(d.Body)
 		}
+	case cmd.Browse != nil:
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		// If a number is provided, open that PR directly
+		if cmd.Browse.Number > 0 {
+			d, err := info.Provider.PrView(ctx, info, cmd.Browse.Number)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return
+			}
+			if strings.TrimSpace(d.URL) == "" {
+				fmt.Fprintf(os.Stderr, "Error: PR #%d has no web URL\n", cmd.Browse.Number)
+				return
+			}
+			if err := OpenBrowser(d.URL); err != nil {
+				fmt.Fprintf(os.Stderr, "Error opening browser: %v\n", err)
+				return
+			}
+			fmt.Printf("Opened %s\n", d.URL)
+			return
+		}
+		// Otherwise, find PR by current branch
+		branch, err := provider.CurrentBranch(info)
+		if err != nil || strings.TrimSpace(branch) == "" {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
+			} else {
+				fmt.Fprintln(os.Stderr, "Error determining current branch")
+			}
+			return
+		}
+		rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{State: "open", Head: branch, Limit: 5})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		if len(rows) == 0 {
+			fmt.Printf("No open pull request found for branch %q.\n", branch)
+			return
+		}
+		if len(rows) > 1 {
+			fmt.Fprintf(os.Stderr, "Found %d PRs for branch %q. Please specify a PR number.\n", len(rows), branch)
+			// Optionally show a short list
+			for i, pr := range rows {
+				if i >= 5 {
+					break
+				}
+				fmt.Fprintf(os.Stderr, "  #%d %s (%s)\n", pr.Number, pr.Title, pr.URL)
+			}
+			return
+		}
+		// Exactly one PR found
+		url := strings.TrimSpace(rows[0].URL)
+		if url == "" {
+			fmt.Fprintln(os.Stderr, "Error: PR has no web URL")
+			return
+		}
+		if err := OpenBrowser(url); err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening browser: %v\n", err)
+			return
+		}
+		fmt.Printf("Opened %s\n", url)
 	case cmd.Checkout != nil:
 		fmt.Printf("[stub] pr checkout #%d\n", cmd.Checkout.Number)
 	case cmd.Merge != nil:
