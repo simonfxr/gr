@@ -9,6 +9,7 @@ import (
 
 	"github.com/simonfxr/gr/pkg/provider"
 	"github.com/simonfxr/gr/tables"
+	"strings"
 )
 
 func runBranch(cmd *BranchCmd, info *provider.Info) {
@@ -122,6 +123,30 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 				}
 			}
 		})
+	case cmd.Browse != nil:
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		name := strings.TrimSpace(cmd.Browse.Name)
+		if name == "" {
+			if b, err := provider.CurrentBranch(info); err == nil {
+				name = b
+			} else {
+				fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
+				return
+			}
+		}
+		url, err := info.Provider.BranchWebURL(info, name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		if err := OpenBrowser(url); err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening browser: %v\n", err)
+			return
+		}
+		fmt.Printf("Opened %s\n", url)
 	default:
 		fmt.Println("'gr branch' requires a subcommand. Try 'gr branch rename'.")
 	}

@@ -81,6 +81,7 @@ type BranchCmd struct {
 	Rename *BranchRenameCmd `arg:"subcommand:rename" help:"rename a branch locally/remotely"`
 	Delete *BranchDeleteCmd `arg:"subcommand:delete" help:"delete a branch locally/remotely"`
 	List   *BranchListCmd   `arg:"subcommand:list" help:"list branches"`
+	Browse *BranchBrowseCmd `arg:"subcommand:browse" help:"open a branch view in the browser"`
 }
 
 type BranchRenameCmd struct {
@@ -105,6 +106,10 @@ type BranchListCmd struct {
 	Author  string `arg:"--author" help:"filter by author (case-insensitive substring)"`
 	Since   string `arg:"--since" help:"filter by max age of last commit (e.g., 72h, 10d, 3w)"`
 	JSON    bool   `arg:"--json" help:"output as JSON"`
+}
+
+type BranchBrowseCmd struct {
+	Name string `arg:"positional" help:"branch name (optional); defaults to current branch"`
 }
 
 func (Args) Description() string {
