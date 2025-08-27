@@ -247,6 +247,7 @@ func handlePrCreate(info *provider.Info, create *PRCreateCmd) {
 		Base:             create.Base,
 		Head:             create.Head,
 		Draft:            create.Draft,
+		SquashByDefault:  !create.NoSquash,
 		DeleteAfterMerge: !create.NoDeleteAfterMerge,
 	})
 	if err != nil {

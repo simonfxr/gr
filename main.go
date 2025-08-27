@@ -44,6 +44,7 @@ type PRCreateCmd struct {
 	Draft              bool   `arg:"--draft" help:"create as draft PR"`
 	Edit               bool   `arg:"--edit" help:"open $VISUAL or $EDITOR to edit title/body (uses PR_EDITMSG in gitdir)"`
 	NoEdit             bool   `arg:"--no-edit" help:"skip interactive editing"`
+	NoSquash           bool   `arg:"--no-squash" help:"do not squash commits when merging (default: squash)"`
 	NoDeleteAfterMerge bool   `arg:"--no-delete-after-merge" help:"keep source branch after merge (default: delete)"`
 	JSON               bool   `arg:"--json" help:"output as JSON"`
 }

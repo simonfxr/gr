@@ -14,11 +14,14 @@ import (
 
 // CreateOptions controls PR/MR creation.
 type CreateOptions struct {
-	Title            string
-	Body             string
-	Base             string // target branch
-	Head             string // source branch
-	Draft            bool
+	Title string
+	Body  string
+	Base  string // target branch
+	Head  string // source branch
+	Draft bool
+	// SquashByDefault indicates the PR/MR should default to squashing commits when merged
+	// (provider support varies; ignored where unsupported)
+	SquashByDefault  bool
 	DeleteAfterMerge bool
 }
 
@@ -162,10 +165,12 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	}
 
 	mr, _, err := gl.MergeRequests.CreateMergeRequest(project, &gitlab.CreateMergeRequestOptions{
-		Title:              gitlab.Ptr(title),
-		SourceBranch:       gitlab.Ptr(head),
-		TargetBranch:       gitlab.Ptr(base),
-		Description:        gitlab.Ptr(in.Body),
+		Title:        gitlab.Ptr(title),
+		SourceBranch: gitlab.Ptr(head),
+		TargetBranch: gitlab.Ptr(base),
+		Description:  gitlab.Ptr(in.Body),
+		// Enable squash by default unless opted out via CLI
+		Squash:             gitlab.Ptr(in.SquashByDefault),
 		RemoveSourceBranch: gitlab.Ptr(in.DeleteAfterMerge),
 	})
 	if err != nil {
