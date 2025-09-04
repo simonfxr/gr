@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -245,12 +246,8 @@ func handlePrCreate(info *provider.Info, create *PRCreateCmd) {
 	}
 	// If --edit is requested, open editor with PR_EDITMSG in gitdir
 	if create.Edit {
-		gitdir, err := provider.GitDirPath(info.Root)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot resolve gitdir: %v\n", err)
-			return
-		}
-		msgPath := filepath.Join(gitdir, "PR_EDITMSG")
+		editDir := cmp.Or(info.Worktree, info.GitDir)
+		msgPath := filepath.Join(editDir, "PR_EDITMSG")
 		initial := strings.TrimRight(title, "\n") + "\n\n" + strings.TrimRight(body, "\n") + "\n"
 		if err := os.WriteFile(msgPath, []byte(initial), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: cannot write %s: %v\n", msgPath, err)

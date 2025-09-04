@@ -12,21 +12,18 @@ import (
 	"strings"
 )
 
-func runBranch(cmd *BranchCmd, info *provider.Info) {
+func runBranch(cmd *BranchCmd, local *provider.LocalRepo) {
 	switch {
 	case cmd.Rename != nil:
 		if cmd.Rename.LocalOnly {
-			if err := provider.LocalBranchRename(cmd.Rename.Old, cmd.Rename.New); err != nil {
+			if err := provider.LocalBranchRename(local.GitRepo, cmd.Rename.Old, cmd.Rename.New); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				return
 			}
 			fmt.Printf("Renamed local branch %q -> %q.\n", cmd.Rename.Old, cmd.Rename.New)
 			return
 		}
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
+		info := detectProvider()
 		ctx := context.Background()
 		// --force is an alias for skipping MR updates/safety checks on providers
 		// where updating MR source branch is not supported (e.g., GitLab).
@@ -43,16 +40,9 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 				fmt.Printf("[dry-run] Would delete local branch %q.\n", d.Name)
 				return
 			}
+			info := detectProvider()
 			if d.RemoteOnly {
-				if info == nil {
-					fmt.Println("[dry-run] Cannot detect provider/repo info; aborting")
-					return
-				}
 				fmt.Printf("[dry-run] Would delete remote branch %q on %s/%s.\n", d.Name, info.Owner, info.Repo)
-				return
-			}
-			if info == nil {
-				fmt.Println("[dry-run] Cannot detect provider/repo info; aborting")
 				return
 			}
 			fmt.Printf("[dry-run] Would delete remote branch %q on %s/%s and local branch.\n", d.Name, info.Owner, info.Repo)
@@ -60,18 +50,15 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 		}
 		// Execute
 		if d.LocalOnly {
-			if err := provider.LocalBranchDelete(d.Name, d.Force); err != nil {
+			if err := provider.LocalBranchDelete(local.GitRepo, d.Name, d.Force); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				return
 			}
 			fmt.Printf("Deleted local branch %q.\n", d.Name)
 			return
 		}
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
 		ctx := context.Background()
+		info := detectProvider()
 		if d.RemoteOnly {
 			if err := info.Provider.BranchDelete(ctx, info, d.Name, provider.BranchDeleteOptions{Force: d.Force}); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -85,13 +72,14 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return
 		}
-		if err := provider.LocalBranchDelete(d.Name, d.Force); err != nil {
+		if err := provider.LocalBranchDelete(info.GitRepo, d.Name, d.Force); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: remote deleted, but failed to delete local branch: %v\n", err)
 			return
 		}
 		fmt.Printf("Deleted remote and local branch %q.\n", d.Name)
 	case cmd.List != nil:
 		l := cmd.List
+		info := detectProvider()
 		if info == nil {
 			fmt.Println("Cannot detect provider/repo info; aborting")
 			return
@@ -124,10 +112,7 @@ func runBranch(cmd *BranchCmd, info *provider.Info) {
 			}
 		})
 	case cmd.Browse != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
+		info := detectProvider()
 		name := strings.TrimSpace(cmd.Browse.Name)
 		if name == "" {
 			if b, err := provider.CurrentBranch(info); err == nil {

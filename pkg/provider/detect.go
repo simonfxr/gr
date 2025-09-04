@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,9 +19,17 @@ import (
 	git "github.com/go-git/go-git/v5"
 )
 
+type LocalRepo struct {
+	Root     string          // absolute repository root directory (worktree), respects -C
+	GitDir   string          // absolute path to /../.git dir (resolved .git file if inside worktree)
+	Worktree string          // absolute path to /../.git/worktrees/<name>
+	GitRepo  *git.Repository // handle to git repository instance or nil if not available
+}
+
 // Info contains parsed repository and provider details inferred from git remotes.
 type Info struct {
-	Root     string   // repository root directory (worktree), respects -C
+	LocalRepo
+
 	Provider Provider // enum: github|gitlab|bitbucket|unknown
 	Variant  string   // cloud|self-hosted|unknown
 	Evidence string   // method used (e.g. api_v4_version, headers, url-heuristic)
@@ -33,19 +42,16 @@ type Info struct {
 	URL    string // original remote URL used
 }
 
-// DetectFromRepo opens the git repository at `dir` and infers provider and repo info
+// DetectFromRepo infers provider and repo info for an already detected local repository
 // by inspecting remotes (preferring origin, then upstream, then first). It also
 // performs light network probing (like the Python reference) to identify self-hosted services.
-func DetectFromRepo(dir string) (*Info, error) {
-	root, err := FindRepoRoot(dir)
-	if err != nil {
-		return nil, err
-	}
-	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
-	if err != nil {
-		return nil, fmt.Errorf("not a git repository: %w", err)
+func DetectFromRepo(localRepo *LocalRepo) (*Info, error) {
+	if localRepo == nil || localRepo.GitRepo == nil {
+		return nil, fmt.Errorf("local repo not available")
 	}
 
+	repo := localRepo.GitRepo
+	// Try go-git first
 	remotes, err := repo.Remotes()
 	if err != nil || len(remotes) == 0 {
 		return nil, fmt.Errorf("no git remotes found")
@@ -74,52 +80,116 @@ func DetectFromRepo(dir string) (*Info, error) {
 	svc, variant, evidence, base := detectService(host, port)
 
 	return &Info{
-		Root:     root,
-		Provider: svc,
-		Variant:  variant,
-		Evidence: evidence,
-		HTTPBase: base,
-		Host:     hostOnly(host),
-		Owner:    owner,
-		Repo:     repoName,
-		Remote:   cfg.Name,
-		URL:      raw,
+		LocalRepo: *localRepo,
+		Provider:  svc,
+		Variant:   variant,
+		Evidence:  evidence,
+		HTTPBase:  base,
+		Host:      hostOnly(host),
+		Owner:     owner,
+		Repo:      repoName,
+		Remote:    cfg.Name,
+		URL:       raw,
 	}, nil
 }
 
-// FindRepoRoot walks upwards from `dir` (or current working directory if empty)
-// until it finds a `.git` directory or file, returning the directory that contains it.
-func FindRepoRoot(dir string) (string, error) {
-	start := dir
-	if start == "" || start == "." {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("getwd: %w", err)
-		}
-		start = wd
-	}
-	abs, err := filepath.Abs(start)
+func findDotGit(path string) (dot string, fi os.FileInfo, err error) {
+	path, err = filepath.Abs(path)
 	if err != nil {
-		abs = start
+		return "", fi, err
 	}
 
-	cur := abs
 	for {
-		gitPath := filepath.Join(cur, ".git")
-		if fi, err := os.Stat(gitPath); err == nil {
-			if fi.IsDir() {
-				return cur, nil
+		pathinfo, err := os.Stat(path)
+		if err != nil {
+			return "", fi, err
+		}
+		if !pathinfo.IsDir() {
+			oldpath := path
+			path = filepath.Dir(path)
+			if oldpath == path {
+				return "", fi, os.ErrNotExist
 			}
-			// Worktree case: .git is a file pointing to gitdir; still treat cur as root
-			return cur, nil
+			continue
 		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			break
+
+		dot = filepath.Join(path, ".git")
+		fi, err := os.Stat(dot)
+		if err == nil {
+			return dot, fi, nil
 		}
-		cur = parent
+
+		if !os.IsNotExist(err) {
+			return "", fi, err
+		}
 	}
-	return "", fmt.Errorf("no git repository found from %s", abs)
+}
+
+// FindRepoRoot returns the absolute path to the root of the repository and git related dir locations:
+// - wt: if "" => the git checkout at root is not a worktree or path to git worktree folder
+// - gitdir: absolute path to root of git repository dir ($root/.git if not in worktree)
+func FindRepoRoot(path string) (root, gitdir, wt string, err error) {
+	path = cmp.Or(path, ".")
+	dot, fi, err := findDotGit(path)
+	if err != nil {
+		return "", "", "", err
+	}
+	root = filepath.Dir(dot)
+	if fi.IsDir() {
+		return root, dot, "", nil
+	}
+	gitdir, wt, err = findWorktreeOfDotGit(dot)
+	if err != nil {
+		return "", "", "", err
+	}
+	return root, gitdir, wt, nil
+}
+
+func FindLocalRepo(path string) (*LocalRepo, error) {
+	root, gitdir, wt, err := FindRepoRoot(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect repo root at %s: %w", path, err)
+	}
+	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{
+		EnableDotGitCommonDir: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("not a git repository at %s: %w", root, err)
+	}
+	return &LocalRepo{
+		Root:     root,
+		GitDir:   gitdir,
+		Worktree: wt,
+		GitRepo:  repo,
+	}, nil
+}
+
+func findWorktreeOfDotGit(dot string) (gitdir, wt string, err error) {
+	b, err := os.ReadFile(dot)
+	if err != nil {
+		return "", "", err
+	}
+
+	line, _, _ := strings.Cut(string(b), "\n")
+	const prefix = "gitdir: "
+	wt, ok := strings.CutPrefix(line, prefix)
+	if !ok {
+		return "", "", fmt.Errorf(".git file has no %s prefix", prefix)
+	}
+
+	wt = strings.TrimSpace(wt)
+
+	b, err = os.ReadFile(filepath.Join(wt, "gitdir"))
+	if err != nil {
+		return "", "", err
+	}
+
+	gitdir, err = filepath.Abs(strings.TrimSpace(string(b)))
+	if err != nil {
+		return "", "", err
+	}
+
+	return gitdir, wt, nil
 }
 
 // parseRemoteURL handles HTTPS/SSH URLs and scp-like syntax and returns host, port, owner, repo

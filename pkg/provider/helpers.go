@@ -3,10 +3,10 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -83,19 +83,18 @@ func bitbucketClient(nfo *Info) (*bitbucket.Client, error) {
 
 // CurrentBranch returns the current branch name of the repository detected from Info.
 func CurrentBranch(nfo *Info) (string, error) {
-	root, err := FindRepoRoot("")
-	if err != nil {
-		return "", err
+	repo := nfo.GitRepo
+	if repo == nil {
+		return "", fmt.Errorf("local repo not available")
 	}
-	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
-	if err != nil {
-		return "", err
-	}
+
 	head, err := repo.Head()
 	if err != nil {
 		return "", err
 	}
-	return head.Name().Short(), nil
+
+	branchName := head.Name().Short()
+	return branchName, nil
 }
 
 // DefaultBranchGitHub returns the default branch for a GitHub repository.
@@ -114,10 +113,12 @@ func DefaultBranchGitHub(ctx context.Context, gh *githublib.Client, nfo *Info) (
 // DefaultBranchGitLab returns the default branch for a GitLab project.
 func DefaultBranchGitLab(ctx context.Context, gl *gitlab.Client, nfo *Info) (string, error) {
 	projectPath := nfo.Owner + "/" + nfo.Repo
+
 	proj, _, err := gl.Projects.GetProject(projectPath, nil)
 	if err != nil {
 		return "", err
 	}
+
 	if proj.DefaultBranch != "" {
 		return proj.DefaultBranch, nil
 	}
@@ -142,13 +143,9 @@ func DefaultBranchBitbucket(ctx context.Context, bb *bitbucket.Client, nfo *Info
 
 // LastCommitTitle returns the first line of the last commit message on HEAD.
 func LastCommitTitle(nfo *Info) (string, error) {
-	root, err := FindRepoRoot("")
-	if err != nil {
-		return "", err
-	}
-	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
-	if err != nil {
-		return "", err
+	repo := nfo.GitRepo
+	if repo == nil {
+		return "", fmt.Errorf("No local repo present")
 	}
 	ref, err := repo.Head()
 	if err != nil {
@@ -170,49 +167,6 @@ func LastCommitTitle(nfo *Info) (string, error) {
 	return strings.TrimSpace(msg), nil
 }
 
-// GitDirPath returns the path to the repository's gitdir (the .git directory).
-// It supports both standard repos where .git is a directory and worktrees
-// where .git is a file pointing to the gitdir.
-func GitDirPath(dir string) (string, error) {
-	root, err := FindRepoRoot(dir)
-	if err != nil {
-		return "", err
-	}
-	dot := filepath.Join(root, ".git")
-	fi, err := os.Stat(dot)
-	if err != nil {
-		return "", err
-	}
-	if fi.IsDir() {
-		return dot, nil
-	}
-	// .git is a file, parse gitdir: <path>
-	b, err := os.ReadFile(dot)
-	if err != nil {
-		return "", err
-	}
-	lines := strings.Split(string(b), "\n")
-	for _, ln := range lines {
-		s := strings.TrimSpace(ln)
-		if s == "" {
-			continue
-		}
-		lower := strings.ToLower(s)
-		const prefix = "gitdir:"
-		if strings.HasPrefix(lower, prefix) {
-			p := strings.TrimSpace(s[len(prefix):])
-			if p == "" {
-				break
-			}
-			if !filepath.IsAbs(p) {
-				p = filepath.Join(root, p)
-			}
-			return p, nil
-		}
-	}
-	return "", errors.New("could not resolve gitdir from .git file")
-}
-
 // ResolvePRTitle ensures a non-empty title, using last commit subject when missing.
 func ResolvePRTitle(inTitle string, nfo *Info) (string, error) {
 	t := strings.TrimSpace(inTitle)
@@ -227,14 +181,9 @@ func ResolvePRTitle(inTitle string, nfo *Info) (string, error) {
 }
 
 // LocalBranchRename renames a local branch reference and updates HEAD if needed.
-func LocalBranchRename(oldName, newName string) error {
-	root, err := FindRepoRoot("")
-	if err != nil {
-		return err
-	}
-	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
-	if err != nil {
-		return err
+func LocalBranchRename(repo *git.Repository, oldName, newName string) error {
+	if repo == nil {
+		return fmt.Errorf("local repo not available")
 	}
 	st := repo.Storer
 	oldRefName := plumbing.NewBranchReferenceName(strings.TrimSpace(oldName))
@@ -266,15 +215,9 @@ func LocalBranchRename(oldName, newName string) error {
 // LocalBranchDelete deletes a local branch reference. It refuses to delete the
 // currently checked out branch. The force flag is currently ignored for safety
 // (git also refuses deletion of the current branch).
-func LocalBranchDelete(name string, force bool) error {
-	_ = force
-	root, err := FindRepoRoot("")
-	if err != nil {
-		return err
-	}
-	repo, err := git.PlainOpenWithOptions(root, &git.PlainOpenOptions{DetectDotGit: true})
-	if err != nil {
-		return err
+func LocalBranchDelete(repo *git.Repository, name string, force bool) error {
+	if repo == nil {
+		return fmt.Errorf("local repo not available")
 	}
 	st := repo.Storer
 	// Determine current branch
