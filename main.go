@@ -26,6 +26,7 @@ type PRCmd struct {
 	Checkout *PRCheckoutCmd `arg:"subcommand:checkout" help:"checkout a pull request branch"`
 	Merge    *PRMergeCmd    `arg:"subcommand:merge" help:"merge a pull request"`
 	Close    *PRCloseCmd    `arg:"subcommand:close" help:"close a pull request"`
+	Comments *PRCommentsCmd `arg:"subcommand:comments" help:"show review comments for a pull/merge request"`
 }
 
 type PRListCmd struct {
@@ -58,6 +59,12 @@ type PRViewCmd struct {
 
 type PRBrowseCmd struct {
 	Number int `arg:"positional" help:"pull request number (optional); if omitted, use current branch"`
+}
+
+type PRCommentsCmd struct {
+	Number int    `arg:"--number,-n" help:"pull request/merge request number"`
+	Branch string `arg:"--branch,-b" help:"branch to resolve PR from when --number is not given (default: current branch)"`
+	JSON   bool   `arg:"--json" help:"output as JSON"`
 }
 
 type PRCheckoutCmd struct {

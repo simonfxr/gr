@@ -270,25 +270,45 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 	if err != nil {
 		return nil, err
 	}
-	// Map state
-	var states []string
+	// Map state to query filter (library has bug with States field - uses Set instead of Add)
+	var stateQuery string
 	switch strings.ToLower(strings.TrimSpace(opts.State)) {
 	case "", "open":
-		states = []string{"OPEN"}
+		stateQuery = `state = "OPEN"`
 	case "merged":
-		states = []string{"MERGED"}
+		stateQuery = `state = "MERGED"`
 	case "closed":
-		states = []string{"MERGED", "DECLINED", "SUPERSEDED"}
+		stateQuery = `state = "MERGED" OR state = "DECLINED" OR state = "SUPERSEDED"`
 	case "all":
-		states = nil
+		stateQuery = ""
 	default:
-		states = []string{"OPEN"}
+		stateQuery = `state = "OPEN"`
 	}
 
 	// Build query string for filters not directly supported
 	var qs []string
+	if stateQuery != "" {
+		qs = append(qs, "("+stateQuery+")")
+	}
+	// Author filter: Bitbucket deprecated username. Use uuid or account_id server-side,
+	// display names are resolved via workspace members API.
+	authorClientFilter := ""
 	if opts.Author != "" {
-		qs = append(qs, fmt.Sprintf("author.username = \"%s\"", opts.Author))
+		if strings.HasPrefix(opts.Author, "{") && strings.HasSuffix(opts.Author, "}") {
+			// UUID format
+			qs = append(qs, fmt.Sprintf("author.uuid = \"%s\"", opts.Author))
+		} else if strings.Contains(opts.Author, ":") {
+			// account_id format (e.g., "557058:xxx")
+			qs = append(qs, fmt.Sprintf("author.account_id = \"%s\"", opts.Author))
+		} else {
+			// Try to resolve display name/nickname to UUID via workspace members
+			if uuid := resolveWorkspaceMemberUUID(bb, nfo.Owner, opts.Author); uuid != "" {
+				qs = append(qs, fmt.Sprintf("author.uuid = \"%s\"", uuid))
+			} else {
+				// Fallback to client-side filtering
+				authorClientFilter = opts.Author
+			}
+		}
 	}
 	if opts.Base != "" {
 		qs = append(qs, fmt.Sprintf("destination.branch.name = \"%s\"", opts.Base))
@@ -301,7 +321,6 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 	po := &bitbucket.PullRequestsOptions{
 		Owner:    nfo.Owner,
 		RepoSlug: nfo.Repo,
-		States:   states,
 		Query:    strings.Join(qs, " AND "),
 	}
 
@@ -333,13 +352,23 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 		// State
 		state, _ := pr["state"].(string)
 		state = strings.ToLower(state)
-		// Author username
+		// Author (try nickname, then display_name)
 		author := ""
+		nickname := ""
+		displayName := ""
 		if au, ok := pr["author"].(map[string]any); ok {
-			if u, ok := au["username"].(string); ok {
-				author = u
-			} else if d, ok := au["display_name"].(string); ok {
-				author = d
+			nickname, _ = au["nickname"].(string)
+			displayName, _ = au["display_name"].(string)
+			if nickname != "" {
+				author = nickname
+			} else {
+				author = displayName
+			}
+		}
+		// Client-side author filter (for display names/nicknames)
+		if authorClientFilter != "" {
+			if !strings.EqualFold(author, authorClientFilter) && !strings.EqualFold(displayName, authorClientFilter) && !strings.EqualFold(nickname, authorClientFilter) {
+				continue
 			}
 		}
 		// CreatedAt
@@ -367,4 +396,19 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 		}
 	}
 	return out, nil
+}
+
+
+// resolveWorkspaceMemberUUID looks up a user by display_name or nickname in workspace members.
+func resolveWorkspaceMemberUUID(bb *bitbucket.Client, workspace, name string) string {
+	res, err := bb.Workspaces.Members(workspace)
+	if err != nil || res == nil {
+		return ""
+	}
+	for _, user := range res.Members {
+		if strings.EqualFold(user.DisplayName, name) || strings.EqualFold(user.Nickname, name) {
+			return user.Uuid
+		}
+	}
+	return ""
 }

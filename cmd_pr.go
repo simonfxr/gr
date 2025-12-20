@@ -223,6 +223,84 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 				fmt.Printf("Deleted remote branch %q.\n", res.Head)
 			}
 		}
+	case cmd.Comments != nil:
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		// Resolve PR number either from --number or by branch
+		prNumber := cmd.Comments.Number
+		if prNumber <= 0 {
+			branch := strings.TrimSpace(cmd.Comments.Branch)
+			if branch == "" {
+				b, err := provider.CurrentBranch(info)
+				if err != nil || strings.TrimSpace(b) == "" {
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
+					} else {
+						fmt.Fprintln(os.Stderr, "Error determining current branch")
+					}
+					return
+				}
+				branch = b
+			}
+			rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{State: "open", Head: branch, Limit: 5})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return
+			}
+			if len(rows) == 0 {
+				fmt.Printf("No open pull request found for branch %q.\n", branch)
+				return
+			}
+			if len(rows) > 1 {
+				fmt.Fprintf(os.Stderr, "Found %d PRs for branch %q. Please specify --number.\n", len(rows), branch)
+				for i, pr := range rows {
+					if i >= 5 {
+						break
+					}
+					fmt.Fprintf(os.Stderr, "  #%d %s (%s)\n", pr.Number, pr.Title, pr.URL)
+				}
+				return
+			}
+			prNumber = rows[0].Number
+		}
+		comments, err := info.Provider.PrComments(ctx, info, prNumber)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		if cmd.Comments.JSON {
+			b, _ := json.MarshalIndent(comments, "", "  ")
+			fmt.Println(string(b))
+			return
+		}
+		if len(comments) == 0 {
+			fmt.Printf("No comments for PR #%d.\n", prNumber)
+			return
+		}
+		headers := []string{"When", "Author", "Comment"}
+		tables.Render(headers, func(yield func([]string) bool) {
+			for _, c := range comments {
+				when := ""
+				if !c.CreatedAt.IsZero() {
+					when = c.CreatedAt.Format(time.RFC3339)[:19]
+				}
+				body := c.Body
+				if path := strings.TrimSpace(c.Path); path != "" {
+					// Prepend file context if present
+					loc := path
+					if c.Line > 0 {
+						loc = fmt.Sprintf("%s:%d", path, c.Line)
+					}
+					body = fmt.Sprintf("[%s] %s", loc, body)
+				}
+				if !yield([]string{when, c.Author, body}) {
+					return
+				}
+			}
+		})
 	default:
 		fmt.Println("'gr pr' requires a subcommand. Try 'gr pr list'.")
 	}

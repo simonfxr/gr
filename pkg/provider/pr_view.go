@@ -158,8 +158,8 @@ func prViewBitbucket(ctx context.Context, nfo *Info, number int) (*PRDetails, er
 	state, _ := pr["state"].(string)
 	author := ""
 	if au, ok := pr["author"].(map[string]any); ok {
-		if u, ok := au["username"].(string); ok {
-			author = u
+		if n, ok := au["nickname"].(string); ok && n != "" {
+			author = n
 		} else if d, ok := au["display_name"].(string); ok {
 			author = d
 		}
