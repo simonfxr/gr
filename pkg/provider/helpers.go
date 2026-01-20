@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"iter"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -19,36 +18,47 @@ import (
 	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"golang.org/x/oauth2"
+
+	"github.com/simonfxr/gr/pkg/auth"
+	"github.com/simonfxr/gr/pkg/config"
 )
 
-// githubClient returns a GitHub client. If GITHUB_TOKEN is set it authenticates
-// requests; otherwise it returns an unauthenticated client so that read-only
-// endpoints can still be used. Supports both github.com and GitHub Enterprise
-// when Info indicates self-hosted.
+// githubClient returns a GitHub client using token from config/env.
 func githubClient(ctx context.Context, nfo *Info) (*githublib.Client, error) {
-	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	var cfg *config.ProviderConfig
+	if nfo != nil && nfo.Config != nil {
+		cfg = &nfo.Config.GitHub
+	}
+	token, err := auth.GetToken(cfg, "GITHUB_TOKEN")
+	if err != nil {
+		return nil, fmt.Errorf("github token: %w", err)
+	}
+
 	var httpClient *http.Client
 	if token != "" {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 		httpClient = oauth2.NewClient(ctx, ts)
-	} else {
-		// unauthenticated client for public or low-scope endpoints
-		httpClient = nil // go-github will use http.DefaultClient
 	}
 
 	if nfo != nil && nfo.Provider == ProviderGitHub && nfo.Variant == "self-hosted" && nfo.HTTPBase != "" {
 		base := strings.TrimRight(nfo.HTTPBase, "/") + "/api/v3/"
-		// For our usage, the REST and upload URLs are the same base.
 		return githublib.NewEnterpriseClient(base, base, httpClient)
 	}
 	return githublib.NewClient(httpClient), nil
 }
 
-// gitlabClient returns an authenticated GitLab client, respecting self-hosted base URL when available.
+// gitlabClient returns an authenticated GitLab client using token from config/env.
 func gitlabClient(nfo *Info) (*gitlab.Client, error) {
-	token := strings.TrimSpace(os.Getenv("GITLAB_TOKEN"))
+	var cfg *config.ProviderConfig
+	if nfo != nil && nfo.Config != nil {
+		cfg = &nfo.Config.GitLab
+	}
+	token, err := auth.GetToken(cfg, "GITLAB_TOKEN")
+	if err != nil {
+		return nil, fmt.Errorf("gitlab token: %w", err)
+	}
 	if token == "" {
-		return nil, errors.New("GITLAB_TOKEN not set")
+		return nil, errors.New("gitlab token not configured (set GITLAB_TOKEN or configure in ~/.config/gr/config.toml)")
 	}
 	if nfo != nil && nfo.Provider == ProviderGitLab && nfo.Variant == "self-hosted" && nfo.HTTPBase != "" {
 		return gitlab.NewClient(token, gitlab.WithBaseURL(strings.TrimRight(nfo.HTTPBase, "/")+"/api/v4"))
@@ -56,29 +66,27 @@ func gitlabClient(nfo *Info) (*gitlab.Client, error) {
 	return gitlab.NewClient(token)
 }
 
-// httpClientWithToken is exposed for future use or tests if needed.
-func httpClientWithToken(token string) *http.Client {
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	return oauth2.NewClient(context.Background(), ts)
-}
-
-// bitbucketClient returns a Bitbucket Cloud client. For now Bitbucket Server is not supported.
-// Auth precedence:
-// - If BITBUCKET_USERNAME and BITBUCKET_TOKEN are set -> Basic auth (app password)
-// - Else if BITBUCKET_TOKEN is set -> OAuth bearer token
+// bitbucketClient returns a Bitbucket Cloud client using token from config/env.
 func bitbucketClient(nfo *Info) (*bitbucket.Client, error) {
 	if nfo != nil && nfo.Provider == ProviderBitbucket && nfo.Variant == "self-hosted" {
 		return nil, errors.New("bitbucket server is not supported yet")
 	}
-	token := strings.TrimSpace(os.Getenv("BITBUCKET_TOKEN"))
-	user := strings.TrimSpace(os.Getenv("BITBUCKET_USERNAME"))
+	var cfg *config.ProviderConfig
+	if nfo != nil && nfo.Config != nil {
+		cfg = &nfo.Config.Bitbucket
+	}
+	token, err := auth.GetToken(cfg, "BITBUCKET_TOKEN")
+	if err != nil {
+		return nil, fmt.Errorf("bitbucket token: %w", err)
+	}
+	user := auth.GetUsername(cfg, "BITBUCKET_USERNAME")
 	if user != "" && token != "" {
 		return bitbucket.NewBasicAuth(user, token), nil
 	}
 	if token != "" {
 		return bitbucket.NewOAuthbearerToken(token), nil
 	}
-	return nil, errors.New("BITBUCKET_TOKEN not set (or provide BITBUCKET_USERNAME + BITBUCKET_TOKEN)")
+	return nil, errors.New("bitbucket token not configured (set BITBUCKET_TOKEN or configure in ~/.config/gr/config.toml)")
 }
 
 // CurrentBranch returns the current branch name of the repository detected from Info.

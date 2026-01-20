@@ -97,7 +97,6 @@ func prCommentsGitLab(ctx context.Context, nfo *Info, number int) ([]PRComment, 
 	return out, nil
 }
 
-
 func prCommentsBitbucket(ctx context.Context, nfo *Info, number int) ([]PRComment, error) {
 	bb, err := bitbucketClient(nfo)
 	if err != nil {

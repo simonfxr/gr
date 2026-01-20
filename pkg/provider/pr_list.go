@@ -398,7 +398,6 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 	return out, nil
 }
 
-
 // resolveWorkspaceMemberUUID looks up a user by display_name or nickname in workspace members.
 func resolveWorkspaceMemberUUID(bb *bitbucket.Client, workspace, name string) string {
 	res, err := bb.Workspaces.Members(workspace)

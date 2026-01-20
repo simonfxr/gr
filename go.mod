@@ -1,8 +1,9 @@
 module github.com/simonfxr/gr
 
-go 1.24
+go 1.25
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/alexflint/go-arg v1.6.0
 	github.com/go-git/go-git/v5 v5.16.2
 	github.com/google/go-github/v74 v74.0.0

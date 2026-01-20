@@ -7,6 +7,7 @@ import (
 
 	"github.com/alexflint/go-arg"
 
+	"github.com/simonfxr/gr/pkg/config"
 	"github.com/simonfxr/gr/pkg/provider"
 )
 
@@ -139,6 +140,16 @@ func lazy[T any](f func() T) func() T {
 // It is set early in main and consumed by the lazy detectors below.
 var chdir string
 
+// loadConfig lazily loads user configuration from ~/.config/gr/config.toml
+var loadConfig = lazy(func() *config.Config {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	return cfg
+})
+
 // detectLocal lazily resolves the local git repository (including worktree-aware
 // paths and a go-git handle). It never performs network probing. This is used
 // by commands that only need local repo state (e.g., local-only branch ops).
@@ -156,7 +167,7 @@ var detectLocal = lazy(func() *provider.LocalRepo {
 // network for self-hosted instances. Used by PR commands and remote branch ops.
 var detectProvider = lazy(func() *provider.Info {
 	local := detectLocal()
-	info, err := provider.DetectFromRepo(local)
+	info, err := provider.DetectFromRepo(local, loadConfig())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Provider detection error: %v\n", err)
 		os.Exit(1)

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
+
+	"github.com/simonfxr/gr/pkg/config"
 )
 
 type LocalRepo struct {
@@ -40,12 +42,14 @@ type Info struct {
 	Repo   string // repository name without .git
 	Remote string // remote name used (e.g. origin)
 	URL    string // original remote URL used
+
+	Config *config.Config // user configuration (may be nil)
 }
 
 // DetectFromRepo infers provider and repo info for an already detected local repository
 // by inspecting remotes (preferring origin, then upstream, then first). It also
 // performs light network probing (like the Python reference) to identify self-hosted services.
-func DetectFromRepo(localRepo *LocalRepo) (*Info, error) {
+func DetectFromRepo(localRepo *LocalRepo, cfg *config.Config) (*Info, error) {
 	if localRepo == nil || localRepo.GitRepo == nil {
 		return nil, fmt.Errorf("local repo not available")
 	}
@@ -69,11 +73,11 @@ func DetectFromRepo(localRepo *LocalRepo) (*Info, error) {
 		}
 	}
 
-	cfg := chosen.Config()
-	if cfg == nil || len(cfg.URLs) == 0 {
+	remoteCfg := chosen.Config()
+	if remoteCfg == nil || len(remoteCfg.URLs) == 0 {
 		return nil, fmt.Errorf("remote %q has no URLs", chosen)
 	}
-	raw := cfg.URLs[0]
+	raw := remoteCfg.URLs[0]
 
 	host, port, owner, repoName := parseRemoteURL(raw)
 
@@ -88,8 +92,9 @@ func DetectFromRepo(localRepo *LocalRepo) (*Info, error) {
 		Host:      hostOnly(host),
 		Owner:     owner,
 		Repo:      repoName,
-		Remote:    cfg.Name,
+		Remote:    remoteCfg.Name,
 		URL:       raw,
+		Config:    cfg,
 	}, nil
 }
 
