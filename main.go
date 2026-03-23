@@ -27,7 +27,8 @@ type PRCmd struct {
 	Checkout *PRCheckoutCmd `arg:"subcommand:checkout" help:"checkout a pull request branch"`
 	Merge    *PRMergeCmd    `arg:"subcommand:merge" help:"merge a pull request"`
 	Close    *PRCloseCmd    `arg:"subcommand:close" help:"close a pull request"`
-	Comments *PRCommentsCmd `arg:"subcommand:comments" help:"show review comments for a pull/merge request"`
+	Comments   *PRCommentsCmd   `arg:"subcommand:comments" help:"show review comments for a pull/merge request"`
+	AddComment *PRAddCommentCmd `arg:"subcommand:addcomment" help:"add an inline review comment to a pull request"`
 }
 
 type PRListCmd struct {
@@ -66,6 +67,12 @@ type PRCommentsCmd struct {
 	Number int    `arg:"--number,-n" help:"pull request/merge request number"`
 	Branch string `arg:"--branch,-b" help:"branch to resolve PR from when --number is not given (default: current branch)"`
 	JSON   bool   `arg:"--json" help:"output as JSON"`
+}
+
+type PRAddCommentCmd struct {
+	Number   int    `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
+	Location string `arg:"positional,required" help:"file:line location for the inline comment"`
+	Body     string `arg:"positional,required" help:"comment text"`
 }
 
 type PRCheckoutCmd struct {

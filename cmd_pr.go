@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -301,6 +302,55 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 				}
 			}
 		})
+	case cmd.AddComment != nil:
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		// Parse file:line
+		filePath, line, err := parseFileLine(cmd.AddComment.Location)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		// Resolve PR number
+		prNumber := cmd.AddComment.Number
+		if prNumber <= 0 {
+			branch, err := provider.CurrentBranch(info)
+			if err != nil || strings.TrimSpace(branch) == "" {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
+				} else {
+					fmt.Fprintln(os.Stderr, "Error determining current branch")
+				}
+				return
+			}
+			rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{State: "open", Head: branch, Limit: 5})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return
+			}
+			if len(rows) == 0 {
+				fmt.Printf("No open pull request found for branch %q.\n", branch)
+				return
+			}
+			if len(rows) > 1 {
+				fmt.Fprintf(os.Stderr, "Found %d PRs for branch %q. Please specify --number.\n", len(rows), branch)
+				return
+			}
+			prNumber = rows[0].Number
+		}
+		err = info.Provider.PrAddComment(ctx, info, prNumber, provider.AddCommentOptions{
+			Path: filePath,
+			Line: line,
+			Body: cmd.AddComment.Body,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		fmt.Printf("Comment added to PR #%d at %s:%d\n", prNumber, filePath, line)
 	default:
 		fmt.Println("'gr pr' requires a subcommand. Try 'gr pr list'.")
 	}
@@ -403,4 +453,17 @@ func handlePrCreate(info *provider.Info, create *PRCreateCmd) {
 	} else {
 		fmt.Printf("Created PR #%d: %s\n", res.Number, res.URL)
 	}
+}
+
+// parseFileLine parses "file:line" into path and line number.
+func parseFileLine(s string) (string, int, error) {
+	i := strings.LastIndex(s, ":")
+	if i < 0 {
+		return "", 0, fmt.Errorf("invalid location %q: expected file:line", s)
+	}
+	line, err := strconv.Atoi(s[i+1:])
+	if err != nil || line <= 0 {
+		return "", 0, fmt.Errorf("invalid line number in %q", s)
+	}
+	return s[:i], line, nil
 }
