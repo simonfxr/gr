@@ -77,10 +77,7 @@ func prListGitHub(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 	} else if opts.Limit > 100 {
 		perPage = 100
 	} else if opts.Limit >= 30 {
-		perPage = opts.Limit
-		if perPage > 100 {
-			perPage = 100
-		}
+		perPage = min(opts.Limit, 100)
 	}
 
 	head := ""
@@ -188,27 +185,23 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 	if opts.Limit > 0 && opts.Limit < perPage {
 		perPage = opts.Limit
 	} else if opts.Limit > 0 && opts.Limit > perPage {
-		if opts.Limit > 100 {
-			perPage = 100
-		} else {
-			perPage = opts.Limit
-		}
+		perPage = min(opts.Limit, 100)
 	}
 
 	listOpts := &gitlab.ListProjectMergeRequestsOptions{
-		ListOptions: gitlab.ListOptions{PerPage: perPage, Page: 1},
+		ListOptions: gitlab.ListOptions{PerPage: int64(perPage), Page: 1},
 	}
 	if glState != nil {
 		listOpts.State = glState
 	}
 	if opts.Author != "" {
-		listOpts.AuthorUsername = gitlab.Ptr(opts.Author)
+		listOpts.AuthorUsername = new(opts.Author)
 	}
 	if opts.Base != "" {
-		listOpts.TargetBranch = gitlab.Ptr(opts.Base)
+		listOpts.TargetBranch = new(opts.Base)
 	}
 	if opts.Head != "" {
-		listOpts.SourceBranch = gitlab.Ptr(opts.Head)
+		listOpts.SourceBranch = new(opts.Head)
 	}
 
 	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
@@ -246,7 +239,7 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 				created = *mr.CreatedAt
 			}
 			results = append(results, PullRequest{
-				Number:    mr.IID,
+				Number:    int(mr.IID),
 				Title:     mr.Title,
 				Author:    author,
 				State:     mr.State,
@@ -335,7 +328,7 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 	if !ok {
 		return nil, fmt.Errorf("unexpected response type from bitbucket")
 	}
-	vals, _ := m["values"].([]interface{})
+	vals, _ := m["values"].([]any)
 	var out []PullRequest
 	for _, it := range vals {
 		pr, _ := it.(map[string]any)

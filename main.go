@@ -20,13 +20,13 @@ type Args struct {
 
 // `gr pr` group and its subcommands (stubs for now)
 type PRCmd struct {
-	List     *PRListCmd     `arg:"subcommand:list" help:"list pull requests"`
-	Create   *PRCreateCmd   `arg:"subcommand:create" help:"create a pull request"`
-	View     *PRViewCmd     `arg:"subcommand:view" help:"view a pull request"`
-	Browse   *PRBrowseCmd   `arg:"subcommand:browse" help:"open a pull request in the browser"`
-	Checkout *PRCheckoutCmd `arg:"subcommand:checkout" help:"checkout a pull request branch"`
-	Merge    *PRMergeCmd    `arg:"subcommand:merge" help:"merge a pull request"`
-	Close    *PRCloseCmd    `arg:"subcommand:close" help:"close a pull request"`
+	List       *PRListCmd       `arg:"subcommand:list" help:"list pull requests"`
+	Create     *PRCreateCmd     `arg:"subcommand:create" help:"create a pull request"`
+	View       *PRViewCmd       `arg:"subcommand:view" help:"view a pull request"`
+	Browse     *PRBrowseCmd     `arg:"subcommand:browse" help:"open a pull request in the browser"`
+	Checkout   *PRCheckoutCmd   `arg:"subcommand:checkout" help:"checkout a pull request branch"`
+	Merge      *PRMergeCmd      `arg:"subcommand:merge" help:"merge a pull request"`
+	Close      *PRCloseCmd      `arg:"subcommand:close" help:"close a pull request"`
 	Comments   *PRCommentsCmd   `arg:"subcommand:comments" help:"show review comments for a pull/merge request"`
 	AddComment *PRAddCommentCmd `arg:"subcommand:addcomment" help:"add an inline review comment to a pull request"`
 }

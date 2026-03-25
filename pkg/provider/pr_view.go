@@ -97,7 +97,7 @@ func prViewGitLab(ctx context.Context, nfo *Info, number int) (*PRDetails, error
 	}
 
 	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
-	mr, _, err := gl.MergeRequests.GetMergeRequest(project, number, nil)
+	mr, _, err := gl.MergeRequests.GetMergeRequest(project, int64(number), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func prViewGitLab(ctx context.Context, nfo *Info, number int) (*PRDetails, error
 	merged := mr.MergedAt != nil && !mr.MergedAt.IsZero()
 
 	details := &PRDetails{
-		Number:    mr.IID,
+		Number:    int(mr.IID),
 		Title:     mr.Title,
 		Body:      mr.Description,
 		Author:    author,

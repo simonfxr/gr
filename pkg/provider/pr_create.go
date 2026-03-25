@@ -80,11 +80,11 @@ func prCreateGitHub(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	}
 
 	npr := &githublib.NewPullRequest{
-		Title: githublib.String(title),
-		Head:  githublib.String(head),
-		Base:  githublib.String(base),
-		Body:  githublib.String(in.Body),
-		Draft: githublib.Bool(in.Draft),
+		Title: new(title),
+		Head:  new(head),
+		Base:  new(base),
+		Body:  new(in.Body),
+		Draft: new(in.Draft),
 	}
 	pr, _, err := gh.PullRequests.Create(ctx, nfo.Owner, nfo.Repo, npr)
 	if err != nil {
@@ -151,8 +151,8 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	// Check existing open MR for source branch
 	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
 	mrs, _, err := gl.MergeRequests.ListProjectMergeRequests(project, &gitlab.ListProjectMergeRequestsOptions{
-		State:        gitlab.Ptr("opened"),
-		SourceBranch: gitlab.Ptr(head),
+		State:        new("opened"),
+		SourceBranch: new(head),
 		ListOptions:  gitlab.ListOptions{PerPage: 1, Page: 1},
 	})
 	if err == nil && len(mrs) > 0 {
@@ -165,13 +165,13 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	}
 
 	mr, _, err := gl.MergeRequests.CreateMergeRequest(project, &gitlab.CreateMergeRequestOptions{
-		Title:        gitlab.Ptr(title),
-		SourceBranch: gitlab.Ptr(head),
-		TargetBranch: gitlab.Ptr(base),
-		Description:  gitlab.Ptr(in.Body),
+		Title:        new(title),
+		SourceBranch: new(head),
+		TargetBranch: new(base),
+		Description:  new(in.Body),
 		// Enable squash by default unless opted out via CLI
-		Squash:             gitlab.Ptr(in.SquashByDefault),
-		RemoveSourceBranch: gitlab.Ptr(in.DeleteAfterMerge),
+		Squash:             new(in.SquashByDefault),
+		RemoveSourceBranch: new(in.DeleteAfterMerge),
 	})
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	}
 	merged := mr.MergedAt != nil && !mr.MergedAt.IsZero()
 	return &PRDetails{
-		Number:    mr.IID,
+		Number:    int(mr.IID),
 		Title:     mr.Title,
 		Body:      mr.Description,
 		Author:    author,
@@ -236,7 +236,7 @@ func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDet
 	})
 	if err == nil {
 		if m, ok := res.(map[string]any); ok {
-			if vals, _ := m["values"].([]interface{}); len(vals) > 0 {
+			if vals, _ := m["values"].([]any); len(vals) > 0 {
 				return nil, fmt.Errorf("a pull request already exists for branch %q", head)
 			}
 		}

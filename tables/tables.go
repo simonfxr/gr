@@ -196,10 +196,3 @@ func repeat(ch rune, n int) string {
 	}
 	return string(b)
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

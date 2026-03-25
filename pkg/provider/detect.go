@@ -257,8 +257,8 @@ func trimDotGit(s string) string {
 
 func hostOnly(h string) string {
 	// Remove any port from host (e.g., example.com:2222)
-	if i := strings.IndexByte(h, ':'); i >= 0 {
-		return h[:i]
+	if before, _, ok := strings.Cut(h, ":"); ok {
+		return before
 	}
 	return h
 }

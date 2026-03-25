@@ -83,7 +83,7 @@ func prCloseGitLab(ctx context.Context, nfo *Info, number int) (*PRDetails, erro
 	}
 	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
 	close := "close"
-	mr, _, err := gl.MergeRequests.UpdateMergeRequest(project, number, &gitlab.UpdateMergeRequestOptions{
+	mr, _, err := gl.MergeRequests.UpdateMergeRequest(project, int64(number), &gitlab.UpdateMergeRequestOptions{
 		StateEvent: &close,
 	})
 	if err != nil {
@@ -102,7 +102,7 @@ func prCloseGitLab(ctx context.Context, nfo *Info, number int) (*PRDetails, erro
 	}
 	merged := mr.MergedAt != nil && !mr.MergedAt.IsZero()
 	return &PRDetails{
-		Number:    mr.IID,
+		Number:    int(mr.IID),
 		Title:     mr.Title,
 		Body:      mr.Description,
 		Author:    author,

@@ -77,9 +77,9 @@ func prMergeGitLab(ctx context.Context, nfo *Info, number int, opts MergeOptions
 	if strings.EqualFold(strings.TrimSpace(opts.Method), "squash") {
 		squash = true
 	}
-	_, _, err = gl.MergeRequests.AcceptMergeRequest(project, number, &gitlab.AcceptMergeRequestOptions{
-		Squash:                   gitlab.Ptr(squash),
-		ShouldRemoveSourceBranch: gitlab.Ptr(opts.DeleteBranch),
+	_, _, err = gl.MergeRequests.AcceptMergeRequest(project, int64(number), &gitlab.AcceptMergeRequestOptions{
+		Squash:                   new(squash),
+		ShouldRemoveSourceBranch: new(opts.DeleteBranch),
 	})
 	if err != nil {
 		return nil, err

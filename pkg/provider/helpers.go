@@ -81,10 +81,18 @@ func bitbucketClient(nfo *Info) (*bitbucket.Client, error) {
 	}
 	user := auth.GetUsername(cfg, "BITBUCKET_USERNAME")
 	if user != "" && token != "" {
-		return bitbucket.NewBasicAuth(user, token), nil
+		c, err := bitbucket.NewBasicAuth(user, token)
+		if err != nil {
+			return nil, err
+		}
+		return c, nil
 	}
 	if token != "" {
-		return bitbucket.NewOAuthbearerToken(token), nil
+		c, err := bitbucket.NewOAuthbearerToken(token)
+		if err != nil {
+			return nil, err
+		}
+		return c, nil
 	}
 	return nil, errors.New("bitbucket token not configured (set BITBUCKET_TOKEN or configure in ~/.config/gr/config.toml)")
 }
@@ -277,9 +285,7 @@ func ParallelMap[T, U any](iter iter.Seq[T], f func(T) (U, error)) ([]U, error) 
 	firstErr := atomic.Pointer[error]{}
 
 	for range npar {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for x := range work {
 				if firstErr.Load() != nil {
 					continue
@@ -287,7 +293,7 @@ func ParallelMap[T, U any](iter iter.Seq[T], f func(T) (U, error)) ([]U, error) 
 				u, err := f(x)
 				results <- result{u, err}
 			}
-		}()
+		})
 	}
 
 	us := []U(nil)

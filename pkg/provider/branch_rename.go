@@ -64,7 +64,7 @@ func branchRenameGitLab(ctx context.Context, nfo *Info, oldName, newName string,
 	}
 
 	// Ensure new branch exists
-	if _, _, err := gl.Branches.CreateBranch(project, &gitlab.CreateBranchOptions{Branch: gitlab.Ptr(newName), Ref: gitlab.Ptr(oldName)}); err != nil {
+	if _, _, err := gl.Branches.CreateBranch(project, &gitlab.CreateBranchOptions{Branch: new(newName), Ref: new(oldName)}); err != nil {
 		if err.Error() == "" || (!containsIgnoreCase(err.Error(), "already exists") && !containsIgnoreCase(err.Error(), "Branch already exists")) {
 			return err
 		}
@@ -148,7 +148,7 @@ func bitbucketRetargetPRs(bb *bitbucket.Client, owner, repo, query string, mutat
 	if !ok {
 		return nil
 	}
-	vals, _ := m["values"].([]interface{})
+	vals, _ := m["values"].([]any)
 	for _, it := range vals {
 		pr, _ := it.(map[string]any)
 		if pr == nil {
@@ -201,7 +201,7 @@ func bitbucketRetargetPRs(bb *bitbucket.Client, owner, repo, query string, mutat
 		}
 		// Reviewers UUIDs
 		reviewers := []string{}
-		if rvs, ok := fp["reviewers"].([]interface{}); ok {
+		if rvs, ok := fp["reviewers"].([]any); ok {
 			for _, rv := range rvs {
 				if m, ok := rv.(map[string]any); ok {
 					if uuid, ok := m["uuid"].(string); ok && uuid != "" {
@@ -237,13 +237,13 @@ func bitbucketRetargetPRs(bb *bitbucket.Client, owner, repo, query string, mutat
 // countGitLabOpenMRs returns the number of open MRs for a project matching the provided
 // source and/or target branch filters. A nil pointer means no filter for that field.
 func countGitLabOpenMRs(gl *gitlab.Client, project string, sourceBranch, targetBranch *string) (int, error) {
-	page := 1
-	perPage := 100
+	var page int64 = 1
+	var perPage int64 = 100
 	total := 0
 	for {
 		opts := &gitlab.ListProjectMergeRequestsOptions{
 			ListOptions: gitlab.ListOptions{PerPage: perPage, Page: page},
-			State:       gitlab.Ptr("opened"),
+			State:       new("opened"),
 		}
 		if sourceBranch != nil {
 			opts.SourceBranch = sourceBranch
@@ -272,13 +272,13 @@ func countGitLabOpenMRs(gl *gitlab.Client, project string, sourceBranch, targetB
 //  2. Update the old MR's description to point to the new MR
 //  3. Close the old MR
 func retargetGitLabMRs(gl *gitlab.Client, project, oldTarget, newTarget string) error {
-	page := 1
-	perPage := 50
+	var page int64 = 1
+	var perPage int64 = 50
 	for {
 		listOpts := &gitlab.ListProjectMergeRequestsOptions{
 			ListOptions:  gitlab.ListOptions{PerPage: perPage, Page: page},
-			State:        gitlab.Ptr("opened"),
-			TargetBranch: gitlab.Ptr(oldTarget),
+			State:        new("opened"),
+			TargetBranch: new(oldTarget),
 		}
 		mrs, resp, err := gl.MergeRequests.ListProjectMergeRequests(project, listOpts)
 		if err != nil {
@@ -287,10 +287,10 @@ func retargetGitLabMRs(gl *gitlab.Client, project, oldTarget, newTarget string) 
 		for _, mr := range mrs {
 			// Step 1: Create a new MR cloning key fields but switching the target branch.
 			newMR, _, err := gl.MergeRequests.CreateMergeRequest(project, &gitlab.CreateMergeRequestOptions{
-				Title:        gitlab.Ptr(mr.Title),
-				SourceBranch: gitlab.Ptr(mr.SourceBranch),
-				TargetBranch: gitlab.Ptr(newTarget),
-				Description:  gitlab.Ptr(mr.Description),
+				Title:        new(mr.Title),
+				SourceBranch: new(mr.SourceBranch),
+				TargetBranch: new(newTarget),
+				Description:  new(mr.Description),
 			})
 			if err != nil {
 				return fmt.Errorf("failed to create replacement MR for !%d: %w", mr.IID, err)
@@ -300,12 +300,12 @@ func retargetGitLabMRs(gl *gitlab.Client, project, oldTarget, newTarget string) 
 			link := newMR.WebURL
 			notice := fmt.Sprintf("\n\nSuperseded by new MR here: %s", link)
 			newDesc := mr.Description + notice
-			if _, _, err := gl.MergeRequests.UpdateMergeRequest(project, mr.IID, &gitlab.UpdateMergeRequestOptions{Description: gitlab.Ptr(newDesc)}); err != nil {
+			if _, _, err := gl.MergeRequests.UpdateMergeRequest(project, mr.IID, &gitlab.UpdateMergeRequestOptions{Description: new(newDesc)}); err != nil {
 				return fmt.Errorf("failed to update description for old MR !%d: %w", mr.IID, err)
 			}
 
 			// Step 3: Close the old MR.
-			if _, _, err := gl.MergeRequests.UpdateMergeRequest(project, mr.IID, &gitlab.UpdateMergeRequestOptions{StateEvent: gitlab.Ptr("close")}); err != nil {
+			if _, _, err := gl.MergeRequests.UpdateMergeRequest(project, mr.IID, &gitlab.UpdateMergeRequestOptions{StateEvent: new("close")}); err != nil {
 				return fmt.Errorf("failed to close old MR !%d: %w", mr.IID, err)
 			}
 		}

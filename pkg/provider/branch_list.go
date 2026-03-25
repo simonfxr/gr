@@ -108,8 +108,8 @@ func branchListRemoteGitLab(ctx context.Context, nfo *Info, opts BranchListOptio
 		return nil, err
 	}
 	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
-	page := 1
-	perPage := 100
+	var page int64 = 1
+	var perPage int64 = 100
 	var out []BranchInfo
 	for {
 		branches, resp, err := gl.Branches.ListBranches(project, &gitlab.ListBranchesOptions{ListOptions: gitlab.ListOptions{PerPage: perPage, Page: page}})

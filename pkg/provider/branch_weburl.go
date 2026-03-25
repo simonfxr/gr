@@ -37,7 +37,7 @@ func (p Provider) BranchWebURL(nfo *Info, branch string) (string, error) {
 	repoEsc := strings.Trim(strings.TrimSpace(nfo.Repo), "/")
 	// owner may include slashes (gitlab groups). Escape each segment.
 	var escOwnerSegs []string
-	for _, seg := range strings.Split(ownerEsc, "/") {
+	for seg := range strings.SplitSeq(ownerEsc, "/") {
 		if seg == "" {
 			continue
 		}
