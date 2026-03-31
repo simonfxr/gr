@@ -13,6 +13,7 @@ import (
 
 // PRComment represents a single review comment on a PR/MR.
 type PRComment struct {
+	ID        int       `json:"id"`
 	Author    string    `json:"author"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
@@ -70,7 +71,7 @@ func prCommentsGitLab(ctx context.Context, nfo *Info, number int) ([]PRComment, 
 			if n.CreatedAt != nil {
 				created = *n.CreatedAt
 			}
-			pc := PRComment{Author: author, Body: n.Body, CreatedAt: created}
+			pc := PRComment{ID: int(n.ID), Author: author, Body: n.Body, CreatedAt: created}
 			// Try to attach path/line when available via Position
 			if n.Position != nil {
 				if p := n.Position.NewPath; p != "" {
@@ -127,6 +128,10 @@ func prCommentsBitbucket(ctx context.Context, nfo *Info, number int) ([]PRCommen
 		if deleted, _ := c["deleted"].(bool); deleted {
 			continue
 		}
+		id := 0
+		if fid, ok := c["id"].(float64); ok {
+			id = int(fid)
+		}
 		body := ""
 		if content, ok := c["content"].(map[string]any); ok {
 			body, _ = content["raw"].(string)
@@ -160,6 +165,7 @@ func prCommentsBitbucket(ctx context.Context, nfo *Info, number int) ([]PRCommen
 			}
 		}
 		out = append(out, PRComment{
+			ID:        id,
 			Author:    author,
 			Body:      body,
 			CreatedAt: created,

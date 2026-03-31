@@ -281,7 +281,7 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			fmt.Printf("No comments for PR #%d.\n", prNumber)
 			return
 		}
-		headers := []string{"When", "Author", "Comment"}
+		headers := []string{"ID", "When", "Author", "Comment"}
 		tables.Render(headers, func(yield func([]string) bool) {
 			for _, c := range comments {
 				when := ""
@@ -297,7 +297,7 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 					}
 					body = fmt.Sprintf("[%s] %s", loc, body)
 				}
-				if !yield([]string{when, c.Author, body}) {
+				if !yield([]string{fmt.Sprintf("%d", c.ID), when, c.Author, body}) {
 					return
 				}
 			}
@@ -317,29 +317,10 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 		// Resolve PR number
 		prNumber := cmd.AddComment.Number
 		if prNumber <= 0 {
-			branch, err := provider.CurrentBranch(info)
-			if err != nil || strings.TrimSpace(branch) == "" {
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
-				} else {
-					fmt.Fprintln(os.Stderr, "Error determining current branch")
-				}
+			prNumber = resolvePRNumberFromBranch(ctx, info)
+			if prNumber <= 0 {
 				return
 			}
-			rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{State: "open", Head: branch, Limit: 5})
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				return
-			}
-			if len(rows) == 0 {
-				fmt.Printf("No open pull request found for branch %q.\n", branch)
-				return
-			}
-			if len(rows) > 1 {
-				fmt.Fprintf(os.Stderr, "Found %d PRs for branch %q. Please specify --number.\n", len(rows), branch)
-				return
-			}
-			prNumber = rows[0].Number
 		}
 		err = info.Provider.PrAddComment(ctx, info, prNumber, provider.AddCommentOptions{
 			Path: filePath,
@@ -351,6 +332,44 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			return
 		}
 		fmt.Printf("Comment added to PR #%d at %s:%d\n", prNumber, filePath, line)
+	case cmd.Reply != nil:
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		prNumber := cmd.Reply.Number
+		if prNumber <= 0 {
+			prNumber = resolvePRNumberFromBranch(ctx, info)
+			if prNumber <= 0 {
+				return
+			}
+		}
+		err := info.Provider.PrReplyComment(ctx, info, prNumber, cmd.Reply.CommentID, cmd.Reply.Body)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		fmt.Printf("Reply added to comment %d on PR #%d\n", cmd.Reply.CommentID, prNumber)
+	case cmd.Resolve != nil:
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		prNumber := cmd.Resolve.Number
+		if prNumber <= 0 {
+			prNumber = resolvePRNumberFromBranch(ctx, info)
+			if prNumber <= 0 {
+				return
+			}
+		}
+		err := info.Provider.PrResolveComment(ctx, info, prNumber, cmd.Resolve.CommentID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return
+		}
+		fmt.Printf("Comment %d on PR #%d resolved.\n", cmd.Resolve.CommentID, prNumber)
 	default:
 		fmt.Println("'gr pr' requires a subcommand. Try 'gr pr list'.")
 	}
@@ -466,4 +485,31 @@ func parseFileLine(s string) (string, int, error) {
 		return "", 0, fmt.Errorf("invalid line number in %q", s)
 	}
 	return s[:i], line, nil
+}
+
+// resolvePRNumberFromBranch finds the open PR for the current branch. Returns 0 on failure.
+func resolvePRNumberFromBranch(ctx context.Context, info *provider.Info) int {
+	branch, err := provider.CurrentBranch(info)
+	if err != nil || strings.TrimSpace(branch) == "" {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "Error determining current branch")
+		}
+		return 0
+	}
+	rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{State: "open", Head: branch, Limit: 5})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 0
+	}
+	if len(rows) == 0 {
+		fmt.Fprintf(os.Stderr, "No open pull request found for branch %q.\n", branch)
+		return 0
+	}
+	if len(rows) > 1 {
+		fmt.Fprintf(os.Stderr, "Found %d PRs for branch %q. Please specify --number.\n", len(rows), branch)
+		return 0
+	}
+	return rows[0].Number
 }
