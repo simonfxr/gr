@@ -25,11 +25,11 @@
         };
       in
       {
-        packages.default = pkgs.buildGoModule {
+        packages.default = pkgs.buildGo126Module {
           pname = "gr";
           version = "0.1.0";
           inherit src;
-          vendorHash = "sha256-4H1WiE3bYRn8Bw3UYSaFi/Kz/HXyFynTg0D8TPHuIb4=";
+          vendorHash = "sha256-9mExOoWE1G1u+dVaFGW0mdJanCHZiINxsAePZS5ZUNM=";
         };
 
         devShells.default = pkgs.mkShell {
