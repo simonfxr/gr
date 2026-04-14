@@ -57,7 +57,7 @@ type PRCreateCmd struct {
 }
 
 type PRViewCmd struct {
-	Number int  `arg:"positional,required" help:"pull request number"`
+	Number int  `arg:"positional" help:"pull request number (optional); if omitted, use current branch"`
 	JSON   bool `arg:"--json" help:"output as JSON"`
 }
 

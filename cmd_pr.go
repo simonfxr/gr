@@ -66,7 +66,14 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			return
 		}
 		ctx := context.Background()
-		d, err := info.Provider.PrView(ctx, info, cmd.View.Number)
+		prNumber := cmd.View.Number
+		if prNumber <= 0 {
+			prNumber = resolvePRNumberFromBranch(ctx, info)
+			if prNumber <= 0 {
+				return
+			}
+		}
+		d, err := info.Provider.PrView(ctx, info, prNumber)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return
