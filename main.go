@@ -28,8 +28,9 @@ type PRCmd struct {
 	Merge      *PRMergeCmd      `arg:"subcommand:merge" help:"merge a pull request"`
 	Close      *PRCloseCmd      `arg:"subcommand:close" help:"close a pull request"`
 	Comments   *PRCommentsCmd   `arg:"subcommand:comments" help:"show review comments for a pull/merge request"`
-	AddComment *PRAddCommentCmd `arg:"subcommand:addcomment" help:"add an inline review comment to a pull request"`
-	Reply      *PRReplyCmd      `arg:"subcommand:reply" help:"reply to a PR comment"`
+	AddComment  *PRAddCommentCmd  `arg:"subcommand:addcomment" help:"add an inline review comment to a pull request"`
+	AddComments *PRAddCommentsCmd `arg:"subcommand:addcomments" help:"add multiple inline comments from a JSON file"`
+	Reply       *PRReplyCmd       `arg:"subcommand:reply" help:"reply to a PR comment"`
 	Resolve    *PRResolveCmd    `arg:"subcommand:resolve" help:"resolve a PR comment"`
 }
 
@@ -75,6 +76,12 @@ type PRAddCommentCmd struct {
 	Number   int    `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
 	Location string `arg:"positional,required" help:"file:line location for the inline comment"`
 	Body     string `arg:"positional,required" help:"comment text"`
+	JSON     bool   `arg:"--json" help:"output as JSON"`
+}
+
+type PRAddCommentsCmd struct {
+	Number   int    `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
+	FromJSON string `arg:"--from-json,required" help:"path to JSON file with comments array [{path, line, body}, ...]"`
 }
 
 type PRReplyCmd struct {

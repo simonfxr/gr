@@ -329,7 +329,7 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 				return
 			}
 		}
-		err = info.Provider.PrAddComment(ctx, info, prNumber, provider.AddCommentOptions{
+		comment, err := info.Provider.PrAddComment(ctx, info, prNumber, provider.AddCommentOptions{
 			Path: filePath,
 			Line: line,
 			Body: cmd.AddComment.Body,
@@ -338,7 +338,46 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return
 		}
-		fmt.Printf("Comment added to PR #%d at %s:%d\n", prNumber, filePath, line)
+		if cmd.AddComment.JSON {
+			b, _ := json.MarshalIndent(comment, "", "  ")
+			fmt.Println(string(b))
+		} else {
+			fmt.Printf("Comment added to PR #%d at %s:%d\n", prNumber, filePath, line)
+		}
+	case cmd.AddComments != nil:
+		if info == nil {
+			fmt.Println("Cannot detect provider/repo info; aborting")
+			return
+		}
+		ctx := context.Background()
+		prNumber := cmd.AddComments.Number
+		if prNumber <= 0 {
+			prNumber = resolvePRNumberFromBranch(ctx, info)
+			if prNumber <= 0 {
+				return
+			}
+		}
+		data, err := os.ReadFile(cmd.AddComments.FromJSON)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading JSON file: %v\n", err)
+			return
+		}
+		var comments []provider.AddCommentOptions
+		if err := json.Unmarshal(data, &comments); err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
+			return
+		}
+		var failed int
+		for _, c := range comments {
+			_, err := info.Provider.PrAddComment(ctx, info, prNumber, c)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error adding comment at %s:%d: %v\n", c.Path, c.Line, err)
+				failed++
+				continue
+			}
+			fmt.Printf("  added: %s:%d\n", c.Path, c.Line)
+		}
+		fmt.Printf("Done: %d/%d comments added to PR #%d.\n", len(comments)-failed, len(comments), prNumber)
 	case cmd.Reply != nil:
 		if info == nil {
 			fmt.Println("Cannot detect provider/repo info; aborting")
