@@ -127,6 +127,13 @@ func findDotGit(path string) (dot string, fi os.FileInfo, err error) {
 		if !os.IsNotExist(err) {
 			return "", fi, err
 		}
+
+		// Move up to parent directory
+		oldpath := path
+		path = filepath.Dir(path)
+		if oldpath == path {
+			return "", fi, os.ErrNotExist
+		}
 	}
 }
 
