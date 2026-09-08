@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
 	"time"
 
 	githublib "github.com/google/go-github/v74/github"
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -135,36 +136,127 @@ func branchListRemoteGitLab(ctx context.Context, nfo *Info, opts BranchListOptio
 }
 
 func branchListRemoteBitbucket(ctx context.Context, nfo *Info, opts BranchListOptions) ([]BranchInfo, error) {
-	bb, err := bitbucketClient(nfo)
+	bb, err := newBitbucketListingClient(nfo)
 	if err != nil {
 		return nil, err
 	}
-	res, err := bb.Repositories.Repository.ListBranches(&bitbucket.RepositoryBranchOptions{Owner: nfo.Owner, RepoSlug: nfo.Repo, Pagelen: 100})
-	if err != nil {
-		return nil, err
+	params := url.Values{
+		"pagelen": {"100"},
+		"fields":  {"next,values.name,values.target.date,values.target.author.user.display_name"},
 	}
+	nameQuery := bitbucketBranchNameQuery(opts.Pattern)
+	var filters []string
+	if nameQuery != "" {
+		filters = append(filters, nameQuery)
+	}
+	if author := strings.TrimSpace(opts.Author); author != "" {
+		filters = append(filters, "target.author.user.display_name ~ "+bitbucketQueryString(author))
+	}
+	if age, err := parseMaxAge(opts.Since); err == nil && age > 0 {
+		// Truncating down to seconds only broadens this prefilter. The local
+		// cutoff remains authoritative, including subsecond precision.
+		cutoff := time.Now().Add(-age).UTC().Format(time.RFC3339)
+		// BBQL datetime literals are unquoted, unlike string literals.
+		filters = append(filters, "target.date > "+cutoff)
+	}
+	query := strings.Join(filters, " AND ")
+	if query != "" {
+		params.Set("q", query)
+	}
+	endpoint := "repositories/" + url.PathEscape(nfo.Owner) + "/" + url.PathEscape(nfo.Repo) + "/refs/branches"
 	var out []BranchInfo
-	if res != nil {
-		for _, b := range res.Branches {
-			info := BranchInfo{Name: b.Name}
-			if b.Target != nil {
-				if dt, ok := b.Target["date"].(string); ok {
-					if t, err := time.Parse(time.RFC3339, dt); err == nil {
-						info.CommitDate = t
-					}
-				}
-				if au, ok := b.Target["author"].(map[string]any); ok {
-					if user, ok := au["user"].(map[string]any); ok {
-						if name, ok := user["display_name"].(string); ok {
-							info.Author = name
-						}
-					}
-				}
-			}
-			out = append(out, info)
+	visit := func(b bitbucketBranchListItem) bool {
+		info := BranchInfo{Name: b.Name, Author: b.Target.Author.User.DisplayName}
+		if t, err := time.Parse(time.RFC3339, b.Target.Date); err == nil {
+			info.CommitDate = t
 		}
+		out = append(out, info)
+		return true
+	}
+	err = bitbucketListPages(ctx, bb, endpoint, params, visit)
+	// Branch name filtering is documented, but support for nested fields can
+	// vary. Retry a rejected query with only that known-safe prefilter; all
+	// requested filters are enforced locally in either case.
+	var apiErr *bitbucketListingError
+	if query != nameQuery && errors.As(err, &apiErr) && apiErr.status == http.StatusBadRequest {
+		out = nil
+		params.Del("q")
+		if nameQuery != "" {
+			params.Set("q", nameQuery)
+		}
+		err = bitbucketListPages(ctx, bb, endpoint, params, visit)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return sortBranches(out, opts), nil
+}
+
+type bitbucketBranchListItem struct {
+	Name   string `json:"name"`
+	Target struct {
+		Date   string `json:"date"`
+		Author struct {
+			User struct {
+				DisplayName string `json:"display_name"`
+			} `json:"user"`
+		} `json:"author"`
+	} `json:"target"`
+}
+
+// bitbucketBranchNameQuery only supplies a necessary condition for path.Match.
+// Wildcards and character classes cannot be translated to Bitbucket's query
+// language; every match must nevertheless contain each unescaped literal run.
+func bitbucketBranchNameQuery(pattern string) string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return ""
+	}
+	if _, err := path.Match(pattern, ""); err != nil {
+		return ""
+	}
+	var literal strings.Builder
+	longest := ""
+	flush := func() {
+		if literal.Len() > len(longest) {
+			longest = literal.String()
+		}
+		literal.Reset()
+	}
+	runes := []rune(pattern)
+	glob, inClass := false, false
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == '\\' {
+			i++
+			if !inClass {
+				literal.WriteRune(runes[i])
+			}
+			continue
+		}
+		if inClass {
+			if r == ']' {
+				inClass = false
+			}
+			continue
+		}
+		switch r {
+		case '*', '?', '[':
+			glob = true
+			flush()
+			inClass = r == '['
+		default:
+			literal.WriteRune(r)
+		}
+	}
+	if !glob {
+		return "name = " + bitbucketQueryString(literal.String())
+	}
+	flush()
+	if longest == "" {
+		return ""
+	}
+	return "name ~ " + bitbucketQueryString(longest)
 }
 
 func sortBranches(in []BranchInfo, opts BranchListOptions) []BranchInfo {

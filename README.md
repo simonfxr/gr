@@ -24,6 +24,26 @@ gr branch delete <name>
 gr branch browse [name] # Open branch in browser
 ```
 
+### Bitbucket listings
+
+```bash
+gr pr list --state merged --author "Simon Reiser" --limit 20
+gr pr list --state all --head "feature/my-change" --limit 10
+gr branch list --pattern "feature/*" --author "Simon" --since 3w --sort date
+```
+
+Bitbucket PRs are listed newest-created first. `--limit` counts matching PRs
+(default 30; zero or negative means unlimited), and pagination stops once enough
+matches are found. `--state all` includes open, merged, declined, and superseded
+PRs; `closed` includes the latter three.
+
+PR authors can be specified by UUID, account ID, nickname, or full display name.
+Names use case-insensitive exact matching; branch authors use case-insensitive
+substring matching. Listings request only the fields needed for output and push
+filters to Bitbucket where possible, retaining local checks for matching semantics.
+If Bitbucket rejects a name/commit-metadata filter, listing falls back to local
+filtering without dropping the other supported filters.
+
 ## Configuration
 
 gr looks for configuration in these locations (in order):

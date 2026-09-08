@@ -68,8 +68,20 @@ func gitlabClient(nfo *Info) (*gitlab.Client, error) {
 
 // bitbucketClient returns a Bitbucket Cloud client using token from config/env.
 func bitbucketClient(nfo *Info) (*bitbucket.Client, error) {
+	user, token, err := bitbucketCredentials(nfo)
+	if err != nil {
+		return nil, err
+	}
+	if user != "" {
+		return bitbucket.NewBasicAuth(user, token)
+	}
+	return bitbucket.NewOAuthbearerToken(token)
+}
+
+// bitbucketCredentials is shared by the SDK and the explicit listing client.
+func bitbucketCredentials(nfo *Info) (string, string, error) {
 	if nfo != nil && nfo.Provider == ProviderBitbucket && nfo.Variant == "self-hosted" {
-		return nil, errors.New("bitbucket server is not supported yet")
+		return "", "", errors.New("bitbucket server is not supported yet")
 	}
 	var cfg *config.ProviderConfig
 	if nfo != nil && nfo.Config != nil {
@@ -77,24 +89,13 @@ func bitbucketClient(nfo *Info) (*bitbucket.Client, error) {
 	}
 	token, err := auth.GetToken(cfg, "BITBUCKET_TOKEN")
 	if err != nil {
-		return nil, fmt.Errorf("bitbucket token: %w", err)
+		return "", "", fmt.Errorf("bitbucket token: %w", err)
 	}
 	user := auth.GetUsername(cfg, "BITBUCKET_USERNAME")
-	if user != "" && token != "" {
-		c, err := bitbucket.NewBasicAuth(user, token)
-		if err != nil {
-			return nil, err
-		}
-		return c, nil
-	}
 	if token != "" {
-		c, err := bitbucket.NewOAuthbearerToken(token)
-		if err != nil {
-			return nil, err
-		}
-		return c, nil
+		return user, token, nil
 	}
-	return nil, errors.New("bitbucket token not configured (set BITBUCKET_TOKEN or configure in ~/.config/gr/config.toml)")
+	return "", "", errors.New("bitbucket token not configured (set BITBUCKET_TOKEN or configure in ~/.config/gr/config.toml)")
 }
 
 // CurrentBranch returns the current branch name of the repository detected from Info.

@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	githublib "github.com/google/go-github/v74/github"
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -258,149 +260,113 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 	return results, nil
 }
 
+// The pullrequests endpoint caps pagelen at 50, unlike the generic API cap of
+// 100. Larger values return HTTP 400 "Invalid pagelen".
+const bitbucketPRMaxPageSize = 50
+
 func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRequest, error) {
-	bb, err := bitbucketClient(nfo)
+	bb, err := newBitbucketListingClient(nfo)
 	if err != nil {
 		return nil, err
 	}
-	// Map state to query filter (library has bug with States field - uses Set instead of Add)
-	var stateQuery string
+	params := url.Values{
+		"sort": {"-created_on"},
+		"fields": {"next,values.id,values.title,values.state,values.created_on," +
+			"values.author.nickname,values.author.display_name,values.links.html.href"},
+	}
+	// Omission means OPEN, not all. Use repeated state parameters rather than
+	// the SDK's States field, which overwrites all but the last state.
 	switch strings.ToLower(strings.TrimSpace(opts.State)) {
-	case "", "open":
-		stateQuery = `state = "OPEN"`
 	case "merged":
-		stateQuery = `state = "MERGED"`
+		params["state"] = []string{"MERGED"}
 	case "closed":
-		stateQuery = `state = "MERGED" OR state = "DECLINED" OR state = "SUPERSEDED"`
+		params["state"] = []string{"MERGED", "DECLINED", "SUPERSEDED"}
 	case "all":
-		stateQuery = ""
+		params["state"] = []string{"OPEN", "MERGED", "DECLINED", "SUPERSEDED"}
 	default:
-		stateQuery = `state = "OPEN"`
+		params["state"] = []string{"OPEN"}
 	}
-
-	// Build query string for filters not directly supported
 	var qs []string
-	if stateQuery != "" {
-		qs = append(qs, "("+stateQuery+")")
-	}
-	// Author filter: Bitbucket deprecated username. Use uuid or account_id server-side,
-	// display names are resolved via workspace members API.
-	authorClientFilter := ""
-	if opts.Author != "" {
-		if strings.HasPrefix(opts.Author, "{") && strings.HasSuffix(opts.Author, "}") {
-			// UUID format
-			qs = append(qs, fmt.Sprintf("author.uuid = \"%s\"", opts.Author))
-		} else if strings.Contains(opts.Author, ":") {
-			// account_id format (e.g., "557058:xxx")
-			qs = append(qs, fmt.Sprintf("author.account_id = \"%s\"", opts.Author))
-		} else {
-			// Try to resolve display name/nickname to UUID via workspace members
-			if uuid := resolveWorkspaceMemberUUID(bb, nfo.Owner, opts.Author); uuid != "" {
-				qs = append(qs, fmt.Sprintf("author.uuid = \"%s\"", uuid))
-			} else {
-				// Fallback to client-side filtering
-				authorClientFilter = opts.Author
-			}
-		}
-	}
 	if opts.Base != "" {
-		qs = append(qs, fmt.Sprintf("destination.branch.name = \"%s\"", opts.Base))
+		qs = append(qs, "destination.branch.name = "+bitbucketQueryString(opts.Base))
 	}
 	if opts.Head != "" {
-		qs = append(qs, fmt.Sprintf("source.branch.name = \"%s\"", opts.Head))
+		qs = append(qs, "source.branch.name = "+bitbucketQueryString(opts.Head))
 	}
-	// Bitbucket Cloud does not have assignee on PRs; ignore Assignee filter for now.
-
-	po := &bitbucket.PullRequestsOptions{
-		Owner:    nfo.Owner,
-		RepoSlug: nfo.Repo,
-		Query:    strings.Join(qs, " AND "),
+	baseQuery := strings.Join(qs, " AND ")
+	authorName := ""
+	if opts.Author != "" {
+		switch {
+		case strings.HasPrefix(opts.Author, "{") && strings.HasSuffix(opts.Author, "}"):
+			qs = append(qs, "author.uuid = "+bitbucketQueryString(opts.Author))
+		case strings.Contains(opts.Author, ":"):
+			qs = append(qs, "author.account_id = "+bitbucketQueryString(opts.Author))
+		default:
+			authorName = opts.Author
+			// Contains is case-insensitive; retain exact EqualFold matching
+			// locally. Do not enumerate workspace members for each invocation.
+			literal := bitbucketQueryString(authorName)
+			qs = append(qs, "(author.nickname ~ "+literal+" OR author.display_name ~ "+literal+")")
+		}
 	}
-
-	// Context isn't used by this library's Gets, but keep symmetry
-	_ = ctx
-
-	res, err := bb.Repositories.PullRequests.Gets(po)
+	if len(qs) > 0 {
+		params.Set("q", strings.Join(qs, " AND "))
+	}
+	pageSize := bitbucketPRMaxPageSize
+	if opts.Limit > 0 {
+		pageSize = max(10, min(opts.Limit, bitbucketPRMaxPageSize))
+	}
+	params.Set("pagelen", strconv.Itoa(pageSize))
+	// Bitbucket Cloud does not have PR assignees; preserve existing behavior.
+	endpoint := "repositories/" + url.PathEscape(nfo.Owner) + "/" + url.PathEscape(nfo.Repo) + "/pullrequests"
+	var out []PullRequest
+	collect := func(pr bitbucketListedPR) bool {
+		if authorName != "" && !strings.EqualFold(pr.Author.Nickname, authorName) && !strings.EqualFold(pr.Author.DisplayName, authorName) {
+			return true
+		}
+		author := pr.Author.Nickname
+		if author == "" {
+			author = pr.Author.DisplayName
+		}
+		created, _ := time.Parse(time.RFC3339, pr.CreatedOn)
+		out = append(out, PullRequest{
+			Number: pr.ID, Title: pr.Title, Author: author,
+			State: strings.ToLower(pr.State), CreatedAt: created, URL: pr.Links.HTML.Href,
+		})
+		return opts.Limit <= 0 || len(out) < opts.Limit
+	}
+	err = bitbucketListPages(ctx, bb, endpoint, params, collect)
+	var apiErr *bitbucketListingError
+	if authorName != "" && errors.As(err, &apiErr) && apiErr.status == http.StatusBadRequest {
+		// Some deployments reject queryable user-name fields. Retry without
+		// that optimization, keeping state/base/head and exact local matching.
+		// Other failures (auth, rate limits, server errors) must not be hidden.
+		params.Del("q")
+		if baseQuery != "" {
+			params.Set("q", baseQuery)
+		}
+		params.Set("pagelen", strconv.Itoa(bitbucketPRMaxPageSize))
+		out = nil
+		err = bitbucketListPages(ctx, bb, endpoint, params, collect)
+	}
 	if err != nil {
 		return nil, err
-	}
-	m, ok := res.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("unexpected response type from bitbucket")
-	}
-	vals, _ := m["values"].([]any)
-	var out []PullRequest
-	for _, it := range vals {
-		pr, _ := it.(map[string]any)
-		if pr == nil {
-			continue
-		}
-		// Number
-		num := 0
-		if v, ok := pr["id"].(float64); ok {
-			num = int(v)
-		}
-		// Title
-		title, _ := pr["title"].(string)
-		// State
-		state, _ := pr["state"].(string)
-		state = strings.ToLower(state)
-		// Author (try nickname, then display_name)
-		author := ""
-		nickname := ""
-		displayName := ""
-		if au, ok := pr["author"].(map[string]any); ok {
-			nickname, _ = au["nickname"].(string)
-			displayName, _ = au["display_name"].(string)
-			if nickname != "" {
-				author = nickname
-			} else {
-				author = displayName
-			}
-		}
-		// Client-side author filter (for display names/nicknames)
-		if authorClientFilter != "" {
-			if !strings.EqualFold(author, authorClientFilter) && !strings.EqualFold(displayName, authorClientFilter) && !strings.EqualFold(nickname, authorClientFilter) {
-				continue
-			}
-		}
-		// CreatedAt
-		createdStr, _ := pr["created_on"].(string)
-		created, _ := time.Parse(time.RFC3339, createdStr)
-		// URL
-		url := ""
-		if links, ok := pr["links"].(map[string]any); ok {
-			if html, ok := links["html"].(map[string]any); ok {
-				if href, ok := html["href"].(string); ok {
-					url = href
-				}
-			}
-		}
-		out = append(out, PullRequest{
-			Number:    num,
-			Title:     title,
-			Author:    author,
-			State:     state,
-			CreatedAt: created,
-			URL:       url,
-		})
-		if opts.Limit > 0 && len(out) >= opts.Limit {
-			break
-		}
 	}
 	return out, nil
 }
 
-// resolveWorkspaceMemberUUID looks up a user by display_name or nickname in workspace members.
-func resolveWorkspaceMemberUUID(bb *bitbucket.Client, workspace, name string) string {
-	res, err := bb.Workspaces.Members(workspace)
-	if err != nil || res == nil {
-		return ""
-	}
-	for _, user := range res.Members {
-		if strings.EqualFold(user.DisplayName, name) || strings.EqualFold(user.Nickname, name) {
-			return user.Uuid
-		}
-	}
-	return ""
+type bitbucketListedPR struct {
+	ID        int    `json:"id"`
+	Title     string `json:"title"`
+	State     string `json:"state"`
+	CreatedOn string `json:"created_on"`
+	Author    struct {
+		Nickname    string `json:"nickname"`
+		DisplayName string `json:"display_name"`
+	} `json:"author"`
+	Links struct {
+		HTML struct {
+			Href string `json:"href"`
+		} `json:"html"`
+	} `json:"links"`
 }
