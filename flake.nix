@@ -25,15 +25,15 @@
         };
       in
       {
-        packages.default = pkgs.buildGo126Module {
+        packages.default = pkgs.buildGo127Module {
           pname = "gr";
           version = "0.1.0";
           inherit src;
-          vendorHash = "sha256-9mExOoWE1G1u+dVaFGW0mdJanCHZiINxsAePZS5ZUNM=";
+          vendorHash = "sha256-TfitwuwFA3qoOX01Cdtv8DOYVR/ItlQ515rUbyw1haE=";
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = [ pkgs.go ];
+          buildInputs = [ pkgs.go_1_27 ];
         };
       }
     );
