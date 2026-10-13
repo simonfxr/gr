@@ -288,7 +288,7 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			fmt.Printf("No comments for PR #%d.\n", prNumber)
 			return
 		}
-		headers := []string{"ID", "When", "Author", "Comment"}
+		headers := []string{"ID", "When", "Author", "Resolved", "Comment"}
 		tables.Render(headers, func(yield func([]string) bool) {
 			for _, c := range comments {
 				when := ""
@@ -304,7 +304,7 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 					}
 					body = fmt.Sprintf("[%s] %s", loc, body)
 				}
-				if !yield([]string{fmt.Sprintf("%d", c.ID), when, c.Author, body}) {
+				if !yield([]string{fmt.Sprintf("%d", c.ID), when, c.Author, strconv.FormatBool(c.Resolved), body}) {
 					return
 				}
 			}

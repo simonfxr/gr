@@ -17,13 +17,14 @@ type PRComment struct {
 	Author    string    `json:"author"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
+	Resolved  bool      `json:"resolved"`
 	// Optional location for inline comments (when available)
 	Path string `json:"path,omitempty"`
 	Line int    `json:"line,omitempty"`
 	URL  string `json:"url,omitempty"`
 }
 
-// PrComments lists review comments for a PR number. For now only GitLab is supported.
+// PrComments lists review comments for a PR number on GitLab or Bitbucket.
 func (p Provider) PrComments(ctx context.Context, nfo *Info, number int) ([]PRComment, error) {
 	if nfo == nil {
 		return nil, errors.New("missing repo info")
@@ -71,7 +72,7 @@ func prCommentsGitLab(ctx context.Context, nfo *Info, number int) ([]PRComment, 
 			if n.CreatedAt != nil {
 				created = *n.CreatedAt
 			}
-			pc := PRComment{ID: int(n.ID), Author: author, Body: n.Body, CreatedAt: created}
+			pc := PRComment{ID: int(n.ID), Author: author, Body: n.Body, CreatedAt: created, Resolved: n.Resolved}
 			// Try to attach path/line when available via Position
 			if n.Position != nil {
 				if p := n.Position.NewPath; p != "" {
@@ -164,11 +165,14 @@ func prCommentsBitbucket(ctx context.Context, nfo *Info, number int) ([]PRCommen
 				url, _ = html["href"].(string)
 			}
 		}
+		// Bitbucket includes a resolution object only when the comment is resolved.
+		resolution, _ := c["resolution"].(map[string]any)
 		out = append(out, PRComment{
 			ID:        id,
 			Author:    author,
 			Body:      body,
 			CreatedAt: created,
+			Resolved:  resolution != nil,
 			Path:      path,
 			Line:      line,
 			URL:       url,
