@@ -18,6 +18,10 @@ gr pr merge <number>    # Merge a PR
 gr pr close <number>    # Close a PR
 gr pr browse [number]   # Open PR in browser
 
+gr pr tasks             # List PR tasks (Bitbucket)
+gr pr addtask <text>    # Create a PR task
+gr pr resolvetask <id>  # Resolve (or --reopen) a PR task
+
 gr branch list          # List remote branches
 gr branch rename <old> <new>
 gr branch delete <name>
@@ -43,6 +47,23 @@ substring matching. Listings request only the fields needed for output and push
 filters to Bitbucket where possible, retaining local checks for matching semantics.
 If Bitbucket rejects a name/commit-metadata filter, listing falls back to local
 filtering without dropping the other supported filters.
+
+### Bitbucket PR tasks
+
+```bash
+gr pr tasks                         # tasks of the open PR for the current branch
+gr pr tasks -n 1282 --state open    # open|resolved|all (default all)
+gr pr tasks -b feature/x --json
+gr pr addtask "Fix UI"                # new task on the current branch's PR
+gr pr addtask -c 1234 "Cleanup types" # attach the task to comment 1234
+gr pr addtask --pending "Fix UI"      # part of your unsubmitted review
+gr pr resolvetask 5678
+gr pr resolvetask --reopen 5678
+```
+
+Without `-n`, the PR is resolved from the open PR of the current (or `-b`)
+branch. Table output shows task ID, resolved/pending state, creator, creation
+time, attached comment ID, and text; `--json` emits the same fields.
 
 ## Configuration
 

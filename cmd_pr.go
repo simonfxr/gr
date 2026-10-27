@@ -416,6 +416,12 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 			return
 		}
 		fmt.Printf("Comment %d on PR #%d resolved.\n", cmd.Resolve.CommentID, prNumber)
+	case cmd.Tasks != nil:
+		handlePrTasks(info, cmd.Tasks)
+	case cmd.AddTask != nil:
+		handlePrAddTask(info, cmd.AddTask)
+	case cmd.ResolveTask != nil:
+		handlePrResolveTask(info, cmd.ResolveTask)
 	default:
 		fmt.Println("'gr pr' requires a subcommand. Try 'gr pr list'.")
 	}
@@ -535,14 +541,24 @@ func parseFileLine(s string) (string, int, error) {
 
 // resolvePRNumberFromBranch finds the open PR for the current branch. Returns 0 on failure.
 func resolvePRNumberFromBranch(ctx context.Context, info *provider.Info) int {
-	branch, err := provider.CurrentBranch(info)
-	if err != nil || strings.TrimSpace(branch) == "" {
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
-		} else {
-			fmt.Fprintln(os.Stderr, "Error determining current branch")
+	return resolvePRNumberForBranch(ctx, info, "")
+}
+
+// resolvePRNumberForBranch finds the open PR for branch (current branch if
+// empty). Returns 0 on failure after reporting the problem on stderr.
+func resolvePRNumberForBranch(ctx context.Context, info *provider.Info, branch string) int {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		b, err := provider.CurrentBranch(info)
+		if err != nil || strings.TrimSpace(b) == "" {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
+			} else {
+				fmt.Fprintln(os.Stderr, "Error determining current branch")
+			}
+			return 0
 		}
-		return 0
+		branch = b
 	}
 	rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{State: "open", Head: branch, Limit: 5})
 	if err != nil {

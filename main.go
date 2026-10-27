@@ -32,6 +32,31 @@ type PRCmd struct {
 	AddComments *PRAddCommentsCmd `arg:"subcommand:addcomments" help:"add multiple inline comments from a JSON file"`
 	Reply       *PRReplyCmd       `arg:"subcommand:reply" help:"reply to a PR comment"`
 	Resolve     *PRResolveCmd     `arg:"subcommand:resolve" help:"resolve a PR comment"`
+	Tasks       *PRTasksCmd       `arg:"subcommand:tasks" help:"list tasks of a pull request"`
+	AddTask     *PRAddTaskCmd     `arg:"subcommand:addtask" help:"create a task on a pull request"`
+	ResolveTask *PRResolveTaskCmd `arg:"subcommand:resolvetask" help:"resolve (or reopen) a pull request task"`
+}
+
+type PRTasksCmd struct {
+	Number int    `arg:"--number,-n" help:"pull request number"`
+	Branch string `arg:"--branch,-b" help:"branch to resolve PR from when --number is not given (default: current branch)"`
+	State  string `arg:"--state" help:"filter by state: open, resolved, all" default:"all"`
+	JSON   bool   `arg:"--json" help:"output as JSON"`
+}
+
+type PRAddTaskCmd struct {
+	Number    int    `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
+	CommentID int    `arg:"--comment,-c" help:"attach the task to this comment ID"`
+	Pending   bool   `arg:"--pending" help:"create as pending (part of your unsubmitted review)"`
+	Body      string `arg:"positional,required" help:"task text"`
+	JSON      bool   `arg:"--json" help:"output as JSON"`
+}
+
+type PRResolveTaskCmd struct {
+	Number int  `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
+	TaskID int  `arg:"positional,required" help:"task ID"`
+	Reopen bool `arg:"--reopen" help:"mark the task as unresolved instead"`
+	JSON   bool `arg:"--json" help:"output as JSON"`
 }
 
 type PRListCmd struct {
