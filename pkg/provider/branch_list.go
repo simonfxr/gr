@@ -23,9 +23,9 @@ type BranchListOptions struct {
 }
 
 type BranchInfo struct {
-	Name       string
-	CommitDate time.Time
-	Author     string
+	Name       string    `json:"name"`
+	CommitDate time.Time `json:"commit_date"`
+	Author     string    `json:"author"`
 }
 
 // BranchListRemote lists remote branches using provider APIs.

@@ -26,12 +26,12 @@ type ListOptions struct {
 
 // PullRequest is a provider-agnostic PR representation for output.
 type PullRequest struct {
-	Number    int
-	Title     string
-	Author    string
-	State     string
-	CreatedAt time.Time
-	URL       string
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	Author    string    `json:"author"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+	URL       string    `json:"url"`
 }
 
 // PrList lists pull/merge requests for a detected provider.

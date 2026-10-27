@@ -12,18 +12,18 @@ import (
 
 // PRDetails is a provider-agnostic view of a single PR/MR.
 type PRDetails struct {
-	Number    int
-	Title     string
-	Body      string
-	Author    string
-	State     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Merged    bool
-	Draft     bool
-	Base      string
-	Head      string
-	URL       string
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	Author    string    `json:"author"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Merged    bool      `json:"merged"`
+	Draft     bool      `json:"draft"`
+	Base      string    `json:"base"`
+	Head      string    `json:"head"`
+	URL       string    `json:"url"`
 }
 
 // PrView retrieves details for a single pull/merge request.
