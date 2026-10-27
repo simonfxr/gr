@@ -244,8 +244,9 @@ func TestGitHubPrListStates(t *testing.T) {
 	}
 }
 
-// githubThreadsHandler serves the reviewThreads query (thread T1 with root
-// 100 and reply 101, resolved as given) and the resolveReviewThread mutation.
+// githubThreadsHandler serves the reviewThreads query (thread T1 whose root
+// comment has node ID C100, resolved as given) and the resolveReviewThread
+// mutation.
 func githubThreadsHandler(t *testing.T, resolved bool, mutated *bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req := decodeJSON(t, r)
@@ -265,7 +266,7 @@ func githubThreadsHandler(t *testing.T, resolved bool, mutated *bool) http.Handl
 		writeJSON(w, http.StatusOK, `{"data":{"repository":{"pullRequest":{"reviewThreads":{
 			"pageInfo":{"hasNextPage":false,"endCursor":"x"},
 			"nodes":[{"id":"T1","isResolved":`+strconv.FormatBool(resolved)+`,
-				"comments":{"nodes":[{"databaseId":100},{"databaseId":101}]}}]}}}}}`)
+				"comments":{"nodes":[{"id":"C100"}]}}]}}}}}`)
 	}
 }
 
@@ -273,9 +274,11 @@ func TestGitHubPrComments(t *testing.T) {
 	f, info := fakeGitHub(t)
 	f.reply("GET /api/v3/repos/owner/repo/issues/7/comments", http.StatusOK,
 		`[{"id":1,"body":"LGTM?","user":{"login":"bob"},"created_at":"2026-10-01T09:00:00Z","html_url":"u1"}]`)
+	// Comment IDs exceed 32 bits; threads are matched by node ID.
 	f.reply("GET /api/v3/repos/owner/repo/pulls/7/comments", http.StatusOK, `[
-		{"id":100,"body":"rename","user":{"login":"rev"},"path":"a.go","line":3,"created_at":"2026-10-01T10:00:00Z","html_url":"u100"},
-		{"id":101,"body":"done","user":{"login":"alice"},"path":"a.go","original_line":3,"in_reply_to_id":100,"created_at":"2026-10-01T11:00:00Z"}]`)
+		{"id":100,"node_id":"C100","body":"rename","user":{"login":"rev"},"path":"a.go","line":3,"created_at":"2026-10-01T10:00:00Z","html_url":"u100"},
+		{"id":4294967396,"node_id":"C4294967396","body":"done","user":{"login":"alice"},"path":"a.go","original_line":3,"in_reply_to_id":100,"created_at":"2026-10-01T11:00:00Z"},
+		{"id":4294967397,"node_id":"C4294967397","body":"no thread","user":{"login":"rev"},"path":"b.go","line":1,"created_at":"2026-10-01T12:00:00Z"}]`)
 	var mutated bool
 	f.handle("POST /api/graphql", githubThreadsHandler(t, false, &mutated))
 	comments, err := ProviderGitHub.PrComments(t.Context(), info, 7)
@@ -286,7 +289,8 @@ func TestGitHubPrComments(t *testing.T) {
 	want := []PRComment{
 		{ID: 1, Author: "bob", Body: "LGTM?", CreatedAt: at(9), URL: "u1"},
 		{ID: 100, Author: "rev", Body: "rename", CreatedAt: at(10), Resolvable: true, Path: "a.go", Line: 3, URL: "u100"},
-		{ID: 101, Author: "alice", Body: "done", CreatedAt: at(11), Path: "a.go", Line: 3, ParentID: 100},
+		{ID: 4294967396, Author: "alice", Body: "done", CreatedAt: at(11), Path: "a.go", Line: 3, ParentID: 100},
+		{ID: 4294967397, Author: "rev", Body: "no thread", CreatedAt: at(12), Path: "b.go", Line: 1},
 	}
 	if !reflect.DeepEqual(comments, want) {
 		t.Errorf("comments:\n got %+v\nwant %+v", comments, want)
@@ -340,19 +344,47 @@ func TestGitHubPrReply(t *testing.T) {
 	if _, err := ProviderGitHub.PrReplyComment(t.Context(), info, 7, 9, "x"); !IsNotFound(err) {
 		t.Errorf("unknown comment: err = %v", err)
 	}
+
+	// A conversation comment of another issue is not quoted into this PR.
+	f.reply("GET /api/v3/repos/owner/repo/pulls/comments/5", http.StatusNotFound, `{"message":"Not Found"}`)
+	f.reply("GET /api/v3/repos/owner/repo/issues/comments/5", http.StatusOK,
+		`{"id":5,"body":"x","issue_url":"https://github.example/api/v3/repos/owner/repo/issues/70"}`)
+	if _, err := ProviderGitHub.PrReplyComment(t.Context(), info, 7, 5, "x"); !IsNotFound(err) {
+		t.Errorf("comment of another issue: err = %v", err)
+	}
 }
 
 func TestGitHubPrResolve(t *testing.T) {
 	f, info := fakeGitHub(t)
 	var mutated bool
 	f.handle("POST /api/graphql", githubThreadsHandler(t, false, &mutated))
+	const prURL = `"pull_request_url":"https://github.example/api/v3/repos/owner/repo/pulls/7"`
+	f.reply("GET /api/v3/repos/owner/repo/pulls/comments/100", http.StatusOK, `{"id":100,"node_id":"C100",`+prURL+`}`)
+	f.reply("GET /api/v3/repos/owner/repo/pulls/comments/101", http.StatusOK, `{"id":101,"node_id":"C101","in_reply_to_id":100,`+prURL+`}`)
 	// A reply's ID resolves its thread.
 	if err := ProviderGitHub.PrResolveComment(t.Context(), info, 7, 101); err != nil || !mutated {
 		t.Errorf("resolve: %v (mutated %v)", err, mutated)
 	}
-	f.reply("GET /api/v3/repos/owner/repo/issues/comments/1", http.StatusOK, `{"id":1}`)
+
+	f.reply("GET /api/v3/repos/owner/repo/pulls/comments/1", http.StatusNotFound, `{"message":"Not Found"}`)
+	f.reply("GET /api/v3/repos/owner/repo/issues/comments/1", http.StatusOK,
+		`{"id":1,"issue_url":"https://github.example/api/v3/repos/owner/repo/issues/7"}`)
 	if err := ProviderGitHub.PrResolveComment(t.Context(), info, 7, 1); !isInvalidArg(err) {
 		t.Errorf("conversation comment: err = %v", err)
+	}
+
+	// A review comment of another PR is not found on this one.
+	f.reply("GET /api/v3/repos/owner/repo/pulls/comments/300", http.StatusOK,
+		`{"id":300,"node_id":"C300","pull_request_url":"https://github.example/api/v3/repos/owner/repo/pulls/8"}`)
+	if err := ProviderGitHub.PrResolveComment(t.Context(), info, 7, 300); !IsNotFound(err) {
+		t.Errorf("comment of another PR: err = %v", err)
+	}
+
+	// Errors other than 404 are reported as they are.
+	f.reply("GET /api/v3/repos/owner/repo/pulls/comments/2", http.StatusNotFound, `{"message":"Not Found"}`)
+	f.reply("GET /api/v3/repos/owner/repo/issues/comments/2", http.StatusInternalServerError, `{"message":"boom"}`)
+	if err := ProviderGitHub.PrResolveComment(t.Context(), info, 7, 2); err == nil || IsNotFound(err) {
+		t.Errorf("server error: err = %v, want it reported", err)
 	}
 }
 

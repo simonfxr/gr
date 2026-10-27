@@ -41,19 +41,27 @@ func prCommentsGitHub(ctx context.Context, nfo *Info, number int) ([]PRComment, 
 	if err != nil {
 		return nil, err
 	}
+	var review []*githublib.PullRequestComment
 	reviewOpts := &githublib.PullRequestListCommentsOptions{PerPage: 100}
 	for {
 		page, resp, err := gh.PullRequests.ListComments(ctx, nfo.Owner, nfo.Repo, number, reviewOpts)
 		if err != nil {
 			return nil, err
 		}
-		for _, c := range page {
-			out = append(out, githubReviewComment(c, threads))
-		}
+		review = append(review, page...)
 		if resp.NextPage == 0 {
 			break
 		}
 		reviewOpts.Page = resp.NextPage
+	}
+	// Threads are keyed by the node ID of their root comment.
+	nodeIDs := make(map[int64]string, len(review))
+	for _, c := range review {
+		nodeIDs[c.GetID()] = c.GetNodeID()
+	}
+	for _, c := range review {
+		root := nodeIDs[cmp.Or(c.GetInReplyTo(), c.GetID())]
+		out = append(out, githubReviewComment(c, threads[root]))
 	}
 	slices.SortStableFunc(out, func(a, b PRComment) int { return a.CreatedAt.Compare(b.CreatedAt) })
 	return out, nil
@@ -91,8 +99,11 @@ func prReplyGitHub(ctx context.Context, nfo *Info, number, commentID int, body s
 	if err != nil {
 		return nil, err
 	}
-	review, _, err := gh.PullRequests.GetComment(ctx, nfo.Owner, nfo.Repo, int64(commentID))
-	if err == nil {
+	review, issue, err := githubGetComment(ctx, gh, nfo, number, commentID)
+	if err != nil {
+		return nil, err
+	}
+	if review != nil {
 		// Replies to replies go to the thread root, as GitHub only has one level.
 		root := cmp.Or(review.GetInReplyTo(), review.GetID())
 		c, _, err := gh.PullRequests.CreateCommentInReplyTo(ctx, nfo.Owner, nfo.Repo, number, body, root)
@@ -101,15 +112,6 @@ func prReplyGitHub(ctx context.Context, nfo *Info, number, commentID int, body s
 		}
 		out := githubReviewComment(c, nil)
 		return &out, nil
-	}
-	if !IsNotFound(err) {
-		return nil, err
-	}
-	issue, _, err := gh.Issues.GetComment(ctx, nfo.Owner, nfo.Repo, int64(commentID))
-	if IsNotFound(err) {
-		return nil, notFoundf("comment %d not found on pull request #%d", commentID, number)
-	} else if err != nil {
-		return nil, err
 	}
 	quoted := fmt.Sprintf("> @%s wrote:\n>\n%s\n\n%s", issue.GetUser().GetLogin(), quoteMarkdown(issue.GetBody()), body)
 	c, _, err := gh.Issues.CreateComment(ctx, nfo.Owner, nfo.Repo, number, &githublib.IssueComment{Body: new(quoted)})
@@ -125,29 +127,68 @@ func prResolveGitHub(ctx context.Context, nfo *Info, number, commentID int) erro
 	if err != nil {
 		return err
 	}
+	review, _, err := githubGetComment(ctx, gh, nfo, number, commentID)
+	if err != nil {
+		return err
+	}
+	if review == nil {
+		return invalidArgf("comment %d is a conversation comment; GitHub can only resolve review threads", commentID)
+	}
+	root := review
+	if review.GetInReplyTo() != 0 {
+		if root, _, err = gh.PullRequests.GetComment(ctx, nfo.Owner, nfo.Repo, review.GetInReplyTo()); err != nil {
+			return err
+		}
+	}
 	threads, err := githubReviewThreads(ctx, gh, nfo, number)
 	if err != nil {
 		return err
 	}
-	for _, t := range threads {
-		if !slices.Contains(t.commentIDs, int64(commentID)) {
-			continue
-		}
-		if t.resolved {
-			return nil
-		}
-		var res struct {
-			ResolveReviewThread struct {
-				Thread struct{ IsResolved bool }
-			}
-		}
-		return githubGraphQL(ctx, gh, `mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }`,
-			map[string]any{"id": t.id}, &res)
+	t, ok := threads[root.GetNodeID()]
+	if !ok {
+		return notFoundf("no review thread found for comment %d on pull request #%d", commentID, number)
 	}
-	if _, _, err := gh.Issues.GetComment(ctx, nfo.Owner, nfo.Repo, int64(commentID)); err == nil {
-		return invalidArgf("comment %d is a conversation comment; GitHub can only resolve review threads", commentID)
+	if t.resolved {
+		return nil
 	}
-	return notFoundf("review comment %d not found on pull request #%d", commentID, number)
+	var res struct {
+		ResolveReviewThread struct {
+			Thread struct{ IsResolved bool }
+		}
+	}
+	return githubGraphQL(ctx, gh, `mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }`,
+		map[string]any{"id": t.id}, &res)
+}
+
+// githubGetComment looks up a comment of a PR by ID: either a review comment
+// or, failing that, a conversation (issue) comment. Comment IDs are unique
+// per repository, so a comment of another PR or issue is reported as not
+// found.
+func githubGetComment(ctx context.Context, gh *githublib.Client, nfo *Info, number, commentID int) (*githublib.PullRequestComment, *githublib.IssueComment, error) {
+	notFound := notFoundf("comment %d not found on pull request #%d", commentID, number)
+	review, _, err := gh.PullRequests.GetComment(ctx, nfo.Owner, nfo.Repo, int64(commentID))
+	if err == nil {
+		if !githubURLOf(review.GetPullRequestURL(), "pulls", number) {
+			return nil, nil, notFound
+		}
+		return review, nil, nil
+	}
+	if !IsNotFound(err) {
+		return nil, nil, err
+	}
+	issue, _, err := gh.Issues.GetComment(ctx, nfo.Owner, nfo.Repo, int64(commentID))
+	if IsNotFound(err) || (err == nil && !githubURLOf(issue.GetIssueURL(), "issues", number)) {
+		return nil, nil, notFound
+	} else if err != nil {
+		return nil, nil, err
+	}
+	return nil, issue, nil
+}
+
+// githubURLOf reports whether an API URL such as a comment's
+// pull_request_url refers to PR/issue number. An absent URL is accepted.
+func githubURLOf(apiURL, kind string, number int) bool {
+	return apiURL == "" || strings.HasSuffix(apiURL, fmt.Sprintf("/%s/%d", kind, number))
 }
 
 func githubIssueComment(c *githublib.IssueComment) PRComment {
@@ -160,9 +201,9 @@ func githubIssueComment(c *githublib.IssueComment) PRComment {
 	}
 }
 
-// githubReviewComment converts a review comment; threads (by root comment
-// ID) supplies the resolution state.
-func githubReviewComment(c *githublib.PullRequestComment, threads map[int64]githubThread) PRComment {
+// githubReviewComment converts a review comment; thread is the review thread
+// it belongs to, if known.
+func githubReviewComment(c *githublib.PullRequestComment, thread *githubThread) PRComment {
 	out := PRComment{
 		ID:        int(c.GetID()),
 		Author:    c.GetUser().GetLogin(),
@@ -173,35 +214,34 @@ func githubReviewComment(c *githublib.PullRequestComment, threads map[int64]gith
 		URL:       c.GetHTMLURL(),
 		ParentID:  int(c.GetInReplyTo()),
 	}
-	root := cmp.Or(c.GetInReplyTo(), c.GetID())
-	if t, ok := threads[root]; ok {
+	if thread != nil {
 		out.Resolvable = out.ParentID == 0
-		out.Resolved = t.resolved
+		out.Resolved = thread.resolved
 	}
 	return out
 }
 
-// githubThread is a review thread: its GraphQL node ID, resolution state
-// and the database IDs of its comments (the first is the root).
+// githubThread is a review thread: its GraphQL node ID and resolution state.
 type githubThread struct {
-	id         string
-	resolved   bool
-	commentIDs []int64
+	id       string
+	resolved bool
 }
 
-// githubReviewThreads returns the review threads of a PR by root comment ID.
-func githubReviewThreads(ctx context.Context, gh *githublib.Client, nfo *Info, number int) (map[int64]githubThread, error) {
+// githubReviewThreads returns the review threads of a PR by the node ID of
+// their root (first) comment. Node IDs are used because GraphQL's 32-bit
+// databaseId cannot hold all REST comment IDs.
+func githubReviewThreads(ctx context.Context, gh *githublib.Client, nfo *Info, number int) (map[string]*githubThread, error) {
 	const query = `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id isResolved comments(first: 100) { nodes { databaseId } } }
+        nodes { id isResolved comments(first: 1) { nodes { id } } }
       }
     }
   }
 }`
-	threads := make(map[int64]githubThread)
+	threads := make(map[string]*githubThread)
 	vars := map[string]any{"owner": nfo.Owner, "repo": nfo.Repo, "number": number, "cursor": nil}
 	for {
 		var res struct {
@@ -216,7 +256,7 @@ func githubReviewThreads(ctx context.Context, gh *githublib.Client, nfo *Info, n
 							ID         string
 							IsResolved bool
 							Comments   struct {
-								Nodes []struct{ DatabaseID int64 }
+								Nodes []struct{ ID string }
 							}
 						}
 					}
@@ -231,12 +271,8 @@ func githubReviewThreads(ctx context.Context, gh *githublib.Client, nfo *Info, n
 		}
 		rt := res.Repository.PullRequest.ReviewThreads
 		for _, n := range rt.Nodes {
-			t := githubThread{id: n.ID, resolved: n.IsResolved}
-			for _, c := range n.Comments.Nodes {
-				t.commentIDs = append(t.commentIDs, c.DatabaseID)
-			}
-			if len(t.commentIDs) > 0 {
-				threads[t.commentIDs[0]] = t
+			if len(n.Comments.Nodes) > 0 && n.Comments.Nodes[0].ID != "" {
+				threads[n.Comments.Nodes[0].ID] = &githubThread{id: n.ID, resolved: n.IsResolved}
 			}
 		}
 		if !rt.PageInfo.HasNextPage {
