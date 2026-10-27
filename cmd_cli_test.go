@@ -43,6 +43,9 @@ func fakeBitbucket(t *testing.T, handler http.HandlerFunc) {
 
 func TestParsePRRef(t *testing.T) {
 	gitlab := &provider.Info{Provider: provider.ProviderGitLab, Owner: "group/sub", Repo: "proj"}
+	github := &provider.Info{Provider: provider.ProviderGitHub, Owner: "workspace", Repo: "repo"}
+	prefixed := &provider.Info{Provider: provider.ProviderGitLab, Variant: "self-hosted", Host: "example.com",
+		HTTPBase: "https://example.com/gitlab", Owner: "group/sub", Repo: "proj"}
 	for _, tc := range []struct {
 		ref  string
 		info *provider.Info
@@ -61,11 +64,16 @@ func TestParsePRRef(t *testing.T) {
 		{"https://bitbucket.org/workspace/other/pull-requests/1282", bitbucketInfo, 0},
 		{"https://bitbucket.org/workspace/repo/src/main", bitbucketInfo, 0},
 		{"https://bitbucket.org/workspace/repo/pull-requests/new", bitbucketInfo, 0},
-		{"https://github.com/workspace/repo/pull/12/files", bitbucketInfo, 12},
+		{"https://github.com/workspace/repo/pull/12/files", github, 12},
+		{"https://github.com/workspace/repo/pull/12/files", bitbucketInfo, 0}, // other host
 		{"https://gitlab.com/group/sub/proj/-/merge_requests/5", gitlab, 5},
 		{"https://gitlab.com/group/proj/-/merge_requests/5", gitlab, 0},
-		{"https://example.com/gitlab/group/sub/proj/-/merge_requests/5", gitlab, 5}, // path prefix
 		{"https://gitlab.com/sub/proj/-/merge_requests/5", gitlab, 0},
+		{"https://gitlab.com/other/group/sub/proj/-/merge_requests/5", gitlab, 0}, // other namespace
+		{"https://example.com/gitlab/group/sub/proj/-/merge_requests/5", gitlab, 0},
+		{"https://example.com/gitlab/group/sub/proj/-/merge_requests/5", prefixed, 5}, // path prefix
+		{"https://example.com/group/sub/proj/-/merge_requests/5", prefixed, 0},
+		{"https://example.com/other/group/sub/proj/-/merge_requests/5", prefixed, 0},
 	} {
 		got, err := parsePRRef(tc.ref, tc.info)
 		if tc.want == 0 {

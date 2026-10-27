@@ -59,28 +59,32 @@ func parsePRRef(ref string, info *provider.Info) (int, error) {
 	if len(repoPath) < 2 {
 		return 0, usageErrorf("invalid pull request URL %q: no repository path", ref)
 	}
-	if info != nil && !sameRepoPath(repoPath, info) {
-		return 0, usageErrorf("pull request URL %q belongs to %s, but the current repository is %s/%s",
-			ref, strings.Join(repoPath, "/"), info.Owner, info.Repo)
+	if info == nil {
+		return n, nil
+	}
+	root, err := url.Parse(info.WebRoot())
+	if err != nil {
+		return 0, err
+	}
+	if !strings.EqualFold(u.Hostname(), root.Hostname()) {
+		return 0, usageErrorf("pull request URL %q is not on %s, the web host of the current repository (if that is wrong, set web_url under [hosts.%q] in ~/.config/gr/config.toml)",
+			ref, root.Host, info.Host)
+	}
+	// An instance below a path prefix (example.com/gitlab) has it in URLs.
+	want := append(strings.Split(info.Owner, "/"), info.Repo)
+	if prefix := strings.Trim(root.Path, "/"); prefix != "" {
+		want = append(strings.Split(prefix, "/"), want...)
+	}
+	if !samePath(repoPath, want) {
+		return 0, usageErrorf("pull request URL %q belongs to %s, but the current repository is %s",
+			ref, strings.Join(repoPath, "/"), strings.Join(want, "/"))
 	}
 	return n, nil
 }
 
-// sameRepoPath reports whether the repository segments of a PR URL denote
-// the current repository. Leading extra segments are the path prefix of an
-// instance hosted below one (example.com/gitlab/group/repo).
-func sameRepoPath(segs []string, info *provider.Info) bool {
-	want := append(strings.Split(info.Owner, "/"), info.Repo)
-	if len(segs) < len(want) {
-		return false
-	}
-	segs = segs[len(segs)-len(want):]
-	for i := range want {
-		if !samePathComponent(segs[i], want[i]) {
-			return false
-		}
-	}
-	return true
+// samePath reports whether the path segments of a URL match want.
+func samePath(segs, want []string) bool {
+	return slices.EqualFunc(segs, want, samePathComponent)
 }
 
 // samePathComponent compares URL and remote path components. Bitbucket URLs

@@ -42,6 +42,10 @@ func (p Provider) BranchWebURL(nfo *Info, branch string) (string, error) {
 	}
 }
 
+// WebRoot returns the web root of the repository's host without trailing
+// slash, e.g. https://github.com or https://example.com/gitlab.
+func (nfo *Info) WebRoot() string { return webRoot(nfo.Provider, nfo) }
+
 // webRoot returns the web root of nfo's host without trailing slash.
 func webRoot(p Provider, nfo *Info) string {
 	if base := strings.TrimRight(nfo.HTTPBase, "/"); base != "" {
