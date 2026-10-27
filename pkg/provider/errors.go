@@ -12,7 +12,19 @@ import (
 // IsNotFound reports whether err is a provider API "404 Not Found" response,
 // e.g. for a non-existent PR, comment or task.
 func IsNotFound(err error) bool {
+	if _, ok := errors.AsType[*NotFoundError](err); ok {
+		return true
+	}
 	return httpStatus(err) == http.StatusNotFound
+}
+
+// NotFoundError reports an object that gr looked up itself and did not find.
+type NotFoundError struct{ msg string }
+
+func (e *NotFoundError) Error() string { return e.msg }
+
+func notFoundf(format string, args ...any) error {
+	return &NotFoundError{msg: fmt.Sprintf(format, args...)}
 }
 
 // IsAuthError reports whether err is caused by missing credentials or by

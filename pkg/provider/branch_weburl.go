@@ -18,33 +18,8 @@ func (p Provider) BranchWebURL(nfo *Info, branch string) (string, error) {
 	if b == "" {
 		return "", errors.New("branch name is required")
 	}
-	webBase := strings.TrimRight(nfo.HTTPBase, "/")
-	if webBase == "" {
-		switch p {
-		case ProviderGitHub:
-			webBase = "https://github.com"
-		case ProviderGitLab:
-			webBase = "https://gitlab.com"
-		case ProviderBitbucket:
-			webBase = "https://bitbucket.org"
-		default:
-			webBase = "https://" + strings.TrimSpace(nfo.Host)
-		}
-	}
-
-	// Escape components
-	ownerEsc := strings.Trim(strings.TrimSpace(nfo.Owner), "/")
-	repoEsc := strings.Trim(strings.TrimSpace(nfo.Repo), "/")
-	// owner may include slashes (gitlab groups). Escape each segment.
-	var escOwnerSegs []string
-	for seg := range strings.SplitSeq(ownerEsc, "/") {
-		if seg == "" {
-			continue
-		}
-		escOwnerSegs = append(escOwnerSegs, url.PathEscape(seg))
-	}
-	ownerPath := strings.Join(escOwnerSegs, "/")
-	repoPath := url.PathEscape(repoEsc)
+	webBase := webRoot(p, nfo)
+	ownerPath, repoPath := escapedRepoPath(nfo)
 	branchPath := url.PathEscape(b)
 
 	switch p {
@@ -65,4 +40,33 @@ func (p Provider) BranchWebURL(nfo *Info, branch string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported provider for branch URL: %v", p)
 	}
+}
+
+// webRoot returns the web root of nfo's host without trailing slash.
+func webRoot(p Provider, nfo *Info) string {
+	if base := strings.TrimRight(nfo.HTTPBase, "/"); base != "" {
+		return base
+	}
+	switch p {
+	case ProviderGitHub:
+		return "https://github.com"
+	case ProviderGitLab:
+		return "https://gitlab.com"
+	case ProviderBitbucket:
+		return "https://bitbucket.org"
+	default:
+		return "https://" + strings.TrimSpace(nfo.Host)
+	}
+}
+
+// escapedRepoPath returns the path-escaped owner (whose slashes, e.g. of
+// GitLab subgroups, are kept) and repository name.
+func escapedRepoPath(nfo *Info) (owner, repo string) {
+	var segs []string
+	for seg := range strings.SplitSeq(strings.Trim(strings.TrimSpace(nfo.Owner), "/"), "/") {
+		if seg != "" {
+			segs = append(segs, url.PathEscape(seg))
+		}
+	}
+	return strings.Join(segs, "/"), url.PathEscape(strings.Trim(strings.TrimSpace(nfo.Repo), "/"))
 }

@@ -459,3 +459,33 @@ token = "work-token"
 		t.Errorf("unknown host: exit %d, stderr: %s", code, stderr)
 	}
 }
+
+// TestTodoOnGitLab lists unresolved threads; GitLab has no tasks.
+func TestTodoOnGitLab(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/api/v4/projects/g%2Fr/merge_requests/5/discussions" {
+			t.Errorf("unexpected request %s", r.URL)
+		}
+		io.WriteString(w, `[
+			{"id":"a","notes":[{"id":1,"body":"open thread","resolvable":true},{"id":2,"body":"reply","resolvable":true}]},
+			{"id":"b","notes":[{"id":3,"body":"resolved","resolvable":true,"resolved":true}]},
+			{"id":"c","individual_note":true,"notes":[{"id":4,"body":"plain note"}]}]`)
+	}))
+	defer server.Close()
+	t.Setenv("GITLAB_TOKEN", "t")
+	info := &provider.Info{Provider: provider.ProviderGitLab, Variant: "self-hosted", Evidence: "config",
+		HTTPBase: server.URL, Owner: "g", Repo: "r"}
+	var err error
+	out := captureStdout(t, func() { err = runPR(t.Context(), &PRCmd{Todo: &PRTodoCmd{PRSelector{Number: "5"}, true}}, info) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report todoReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if report.OpenTasks != 0 || report.UnresolvedComments != 1 || len(report.Items) != 1 ||
+		report.Items[0].ID != 1 || len(report.Items[0].Replies) != 1 {
+		t.Errorf("report = %+v", report)
+	}
+}

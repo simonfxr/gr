@@ -18,8 +18,8 @@ gr pr merge [PR]        # Merge a PR
 gr pr close [PR]        # Close a PR
 gr pr browse [PR]       # Open PR in browser
 
-gr pr todo              # What is left: open tasks + unresolved comments (Bitbucket)
-gr pr comments          # List review comments
+gr pr todo              # What is left: open tasks + unresolved comment threads
+gr pr comments          # List review comments (Bitbucket, GitLab)
 gr pr addcomment <file:line> <text>
 gr pr addcomments --from-json <file|->
 gr pr reply <comment-id> <text>
@@ -99,12 +99,19 @@ gr pr todo            # current branch's PR
 gr pr todo -n 1282 --json
 ```
 
-Lists open tasks and unresolved top-level comment threads, oldest first. Each
-item has `kind` (`task`/`comment`), `id`, `author`, `body`, `created_at` and,
-when known, the code location (`path`, `line`). Tasks attached to a comment
-inherit its location and carry `comment_id` and `pending`; comments include
-their thread `replies`. Close items with `gr pr resolvetask ID` or
-`gr pr resolve ID`.
+Lists open tasks (Bitbucket only) and unresolved comment threads, oldest
+first. Each item has `kind` (`task`/`comment`), `id`, `author`, `body`,
+`created_at` and, when known, the code location (`path`, `line`). Tasks
+attached to a comment inherit its location and carry `comment_id` and
+`pending`; comments include their thread `replies`. Close items with
+`gr pr resolvetask ID` or `gr pr resolve ID`.
+
+Only resolvable threads are listed: every top-level comment on Bitbucket, and
+threads (including inline comments) on GitLab, but not standalone GitLab
+notes. In `gr pr comments`, thread roots carry `resolvable`; replies have
+`parent_id` (on GitLab the thread's first comment). On GitLab, `reply` and
+`resolve` take any comment ID of a thread and act on the whole thread;
+replying to a standalone note starts a thread.
 
 ### Bitbucket listings
 

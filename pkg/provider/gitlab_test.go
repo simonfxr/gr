@@ -163,23 +163,100 @@ func TestGitLabBranchListPaginates(t *testing.T) {
 	}
 }
 
-func TestGitLabPrCommentsPaginates(t *testing.T) {
+// gitlabDiscussionsFixture has a resolved inline thread with a reply, a
+// standalone (unresolvable) note and an unresolved general thread.
+const gitlabDiscussionsFixture = `[
+	{"id":"d1","notes":[
+		{"id":11,"body":"rename this","author":{"username":"rev"},"created_at":"2026-10-01T10:00:00Z",
+		 "resolvable":true,"resolved":true,"position":{"new_path":"a.go","new_line":3}},
+		{"id":12,"body":"done","author":{"username":"me"},"resolvable":true,"resolved":true}]},
+	{"id":"d2","individual_note":true,"notes":[
+		{"id":21,"body":"nice","author":{"name":"Bob"}},
+		{"id":22,"body":"added 1 commit","system":true}]}]`
+
+func TestGitLabPrCommentsThreads(t *testing.T) {
 	f, info := fakeGitLab(t)
-	f.handle("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5/notes", func(w http.ResponseWriter, r *http.Request) {
+	f.handle("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5/discussions", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("page") == "2" {
-			gitlabPage(w, "2", "", `[{"id":3,"body":"third","author":{"username":"bob"}}]`)
+			gitlabPage(w, "2", "", `[{"id":"d3","notes":[{"id":31,"body":"why?","author":{"username":"rev"},
+				"resolvable":true,"resolved":false,"position":{"old_path":"b.go","old_line":7}}]}]`)
 			return
 		}
-		gitlabPage(w, "1", "2", `[{"id":1,"body":"first","author":{"username":"bob"}},
-			{"id":2,"body":"assigned","system":true,"author":{"username":"bob"}}]`)
+		gitlabPage(w, "1", "2", gitlabDiscussionsFixture)
 	})
 	comments, err := ProviderGitLab.PrComments(t.Context(), info, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(comments) != 2 || comments[0].ID != 1 || comments[1].ID != 3 {
-		t.Errorf("comments = %+v", comments)
+	base := info.HTTPBase + "/group/sub/proj/-/merge_requests/5#note_"
+	want := []PRComment{
+		{ID: 11, Author: "rev", Body: "rename this", CreatedAt: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC),
+			Resolvable: true, Resolved: true, Path: "a.go", Line: 3, URL: base + "11"},
+		{ID: 12, Author: "me", Body: "done", Resolved: true, URL: base + "12", ParentID: 11},
+		{ID: 21, Author: "Bob", Body: "nice", URL: base + "21"},
+		{ID: 31, Author: "rev", Body: "why?", Resolvable: true, Path: "b.go", Line: 7, URL: base + "31"},
 	}
+	if !reflect.DeepEqual(comments, want) {
+		t.Errorf("comments:\n got %+v\nwant %+v", comments, want)
+	}
+}
+
+func TestGitLabPrAddComment(t *testing.T) {
+	f, info := fakeGitLab(t)
+	f.reply("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5", http.StatusOK,
+		strings.Replace(gitlabMR5, `"iid":5,`, `"iid":5,"diff_refs":{"base_sha":"b","head_sha":"h","start_sha":"s"},`, 1))
+	f.handle("POST /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5/discussions", func(w http.ResponseWriter, r *http.Request) {
+		want := map[string]any{"body": "fix", "position": map[string]any{
+			"position_type": "text", "base_sha": "b", "head_sha": "h", "start_sha": "s",
+			"old_path": "a.go", "new_path": "a.go", "new_line": float64(9),
+		}}
+		if got := decodeJSON(t, r); !reflect.DeepEqual(got, want) {
+			t.Errorf("payload = %v", got)
+		}
+		writeJSON(w, http.StatusCreated, `{"id":"d9","notes":[{"id":91,"body":"fix","resolvable":true,
+			"position":{"new_path":"a.go","new_line":9}}]}`)
+	})
+	c, err := ProviderGitLab.PrAddComment(t.Context(), info, 5, AddCommentOptions{Path: "a.go", Line: 9, Body: "fix"})
+	if err != nil || c.ID != 91 || c.Path != "a.go" || c.Line != 9 || !c.Resolvable {
+		t.Errorf("got %+v, %v", c, err)
+	}
+}
+
+func TestGitLabPrReplyAndResolve(t *testing.T) {
+	f, info := fakeGitLab(t)
+	f.reply("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5/discussions", http.StatusOK, gitlabDiscussionsFixture)
+	f.handle("POST /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5/discussions/d1/notes", func(w http.ResponseWriter, r *http.Request) {
+		if got := decodeJSON(t, r); got["body"] != "ok" {
+			t.Errorf("payload = %v", got)
+		}
+		writeJSON(w, http.StatusCreated, `{"id":13,"body":"ok","author":{"username":"me"}}`)
+	})
+	// Replying to a reply (12) goes to its discussion; the reply's parent is the root.
+	c, err := ProviderGitLab.PrReplyComment(t.Context(), info, 5, 12, "ok")
+	if err != nil || c.ID != 13 || c.ParentID != 11 {
+		t.Errorf("reply = %+v, %v", c, err)
+	}
+
+	f.handle("PUT /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5/discussions/d1", func(w http.ResponseWriter, r *http.Request) {
+		if got := decodeJSON(t, r); got["resolved"] != true {
+			t.Errorf("payload = %v", got)
+		}
+		writeJSON(w, http.StatusOK, `{"id":"d1","notes":[]}`)
+	})
+	if err := ProviderGitLab.PrResolveComment(t.Context(), info, 5, 11); err != nil {
+		t.Error(err)
+	}
+	if err := ProviderGitLab.PrResolveComment(t.Context(), info, 5, 21); !isInvalidArg(err) {
+		t.Errorf("resolving a standalone note: err = %v", err)
+	}
+	if err := ProviderGitLab.PrResolveComment(t.Context(), info, 5, 99); !IsNotFound(err) {
+		t.Errorf("unknown note: err = %v", err)
+	}
+}
+
+func isInvalidArg(err error) bool {
+	_, ok := err.(*InvalidArgumentError)
+	return ok
 }
 
 func TestGitLabPrListStates(t *testing.T) {

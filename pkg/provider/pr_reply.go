@@ -15,6 +15,8 @@ func (p Provider) PrReplyComment(ctx context.Context, nfo *Info, number, comment
 		return nil, invalidArgf("reply body must not be empty")
 	}
 	switch p {
+	case ProviderGitLab:
+		return prReplyGitLab(ctx, nfo, number, commentID, body)
 	case ProviderBitbucket:
 		return bitbucketPostComment(ctx, nfo, number, map[string]any{
 			"content": map[string]any{"raw": body},

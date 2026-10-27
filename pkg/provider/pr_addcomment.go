@@ -35,7 +35,7 @@ func (p Provider) PrAddComment(ctx context.Context, nfo *Info, number int, opts 
 	case ProviderGitHub:
 		return nil, unsupported("pr addcomment", p)
 	case ProviderGitLab:
-		return nil, unsupported("pr addcomment", p)
+		return prAddCommentGitLab(ctx, nfo, number, opts)
 	default:
 		return nil, fmt.Errorf("unknown provider: %v", p)
 	}
