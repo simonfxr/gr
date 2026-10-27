@@ -299,8 +299,18 @@ func TestGitLabPrListStates(t *testing.T) {
 
 // fakeGitLabRename serves the requests of a branch rename old -> new. MR 3
 // targets old; sourceMRs are the MRs whose source branch is old.
+// gitlabRenameTargetMR is the MR !3 targeting the renamed branch "old".
+const gitlabRenameTargetMR = `[{"iid":3,"title":"T","description":"D","source_branch":"feature"}]`
+
 func fakeGitLabRename(t *testing.T, sourceMRs string, updateStatus int) (*fakeAPI, *Info) {
+	return fakeGitLabRenameWith(t, `{"id":7,"default_branch":"main"}`, sourceMRs, gitlabRenameTargetMR, updateStatus)
+}
+
+// fakeGitLabRenameWith serves renaming branch "old" to "new" in project
+// group/sub/proj, described by project.
+func fakeGitLabRenameWith(t *testing.T, project, sourceMRs, targetMRs string, updateStatus int) (*fakeAPI, *Info) {
 	f, info := fakeGitLab(t)
+	f.reply("GET /api/v4/projects/group%2Fsub%2Fproj", http.StatusOK, project)
 	const mrs = "GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests"
 	f.handle(mrs, func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -310,7 +320,7 @@ func fakeGitLabRename(t *testing.T, sourceMRs string, updateStatus int) (*fakeAP
 		case q.Get("source_branch") == "old":
 			writeJSON(w, http.StatusOK, sourceMRs)
 		case q.Get("target_branch") == "old":
-			writeJSON(w, http.StatusOK, `[{"iid":3,"title":"T","description":"D","source_branch":"feature"}]`)
+			writeJSON(w, http.StatusOK, targetMRs)
 		default:
 			t.Errorf("query = %v", q)
 		}
@@ -357,6 +367,55 @@ func TestGitLabBranchRenameRecreatesMRAsFallback(t *testing.T) {
 	if err := ProviderGitLab.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestGitLabBranchRenameRefusesDefaultBranch(t *testing.T) {
+	f, info := fakeGitLabRenameWith(t, `{"id":7,"default_branch":"old"}`, `[]`, `[]`, http.StatusOK)
+	err := ProviderGitLab.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{Force: true})
+	if !isInvalidArg(err) || !strings.Contains(err.Error(), "default branch") {
+		t.Fatalf("err = %v", err)
+	}
+	if f.called("POST /api/v4/projects/group%2Fsub%2Fproj/repository/branches") {
+		t.Error("branch created despite refusal")
+	}
+}
+
+func TestGitLabBranchRenameDoesNotRecreateForkMRs(t *testing.T) {
+	f, info := fakeGitLabRenameWith(t, `{"id":7,"default_branch":"main"}`, `[]`,
+		`[{"iid":3,"title":"T","source_branch":"feature","source_project_id":99,"target_project_id":7}]`, http.StatusConflict)
+	err := ProviderGitLab.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{})
+	if err == nil || !strings.Contains(err.Error(), "fork") {
+		t.Fatalf("err = %v", err)
+	}
+	if f.called("POST /api/v4/projects/group%2Fsub%2Fproj/merge_requests") {
+		t.Error("fork MR recreated from this project's branch")
+	}
+}
+
+// TestGitLabBranchRenameForkSourceMRs checks which MRs count as coming from
+// the renamed branch: MRs from forks with a same-named branch do not, MRs
+// from this fork into its upstream project do.
+func TestGitLabBranchRenameForkSourceMRs(t *testing.T) {
+	t.Run("incoming", func(t *testing.T) {
+		_, info := fakeGitLabRename(t, `[{"iid":8,"source_branch":"old","source_project_id":99,"target_project_id":7}]`, http.StatusOK)
+		if err := ProviderGitLab.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{}); err != nil {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("outgoing", func(t *testing.T) {
+		f, info := fakeGitLabRenameWith(t, `{"id":7,"default_branch":"main","forked_from_project":{"id":1}}`, `[]`, `[]`, http.StatusOK)
+		f.handle("GET /api/v4/projects/1/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+			if q := r.URL.Query(); q.Get("source_branch") != "old" || q.Get("state") != "opened" {
+				t.Errorf("query = %v", q)
+			}
+			writeJSON(w, http.StatusOK, `[{"iid":2,"source_branch":"old","source_project_id":99,"target_project_id":1},
+				{"iid":4,"source_branch":"old","source_project_id":7,"target_project_id":1,"web_url":"https://gl/up/-/merge_requests/4"}]`)
+		})
+		err := ProviderGitLab.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{})
+		if !isInvalidArg(err) || !strings.Contains(err.Error(), "1 open merge request") || !strings.Contains(err.Error(), "merge_requests/4") {
+			t.Fatalf("err = %v", err)
+		}
+	})
 }
 
 func TestGitLabBranchRenameSourceMRs(t *testing.T) {

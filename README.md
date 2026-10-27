@@ -70,8 +70,12 @@ source branch the same way.
 local one) and retargets open PRs, unless `--no-update-prs` is given. GitHub
 does this itself; on Bitbucket gr updates the source and target branch of open
 PRs. On GitLab, MRs targeting the branch get the new target branch (recreated
-only if GitLab rejects the change), but an MR's source branch cannot be
-changed: if open MRs come from the branch, gr refuses unless `--force`.
+only if GitLab rejects the change; never for MRs from forks), but an MR's
+source branch cannot be changed: if open MRs come from the branch, including
+MRs from a fork into its upstream project, gr refuses unless `--force`. GitLab
+and Bitbucket rename by creating the new branch and deleting the old one, so gr
+refuses to rename the default branch there, and branch protection rules for the
+exact old name do not carry over.
 
 ### Text input
 

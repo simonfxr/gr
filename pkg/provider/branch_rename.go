@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -53,16 +54,25 @@ func branchRenameGitLab(ctx context.Context, nfo *Info, oldName, newName string,
 	}
 	project := gitlabProject(nfo)
 
-	// Check before changing anything: GitLab cannot change an MR's source branch.
+	// Check before changing anything.
+	proj, _, err := gl.Projects.GetProject(project, nil)
+	if err != nil {
+		return err
+	}
+	if proj.DefaultBranch == oldName {
+		return invalidArgf("%q is the default branch of %s; change the default branch first", oldName, project)
+	}
+	// GitLab cannot change an MR's source branch.
 	if !opts.Force {
-		fromOld, err := gitlabOpenMRs(gl, project, &oldName, nil)
+		fromOld, err := gitlabMRsFromBranch(gl, project, proj, oldName)
 		if err != nil {
 			return err
 		}
 		if len(fromOld) > 0 {
-			return invalidArgf("%d open merge request(s) use %q as source branch (e.g. !%d), and GitLab cannot change an MR's source branch; "+
+			example := cmp.Or(fromOld[0].WebURL, fmt.Sprintf("!%d", fromOld[0].IID))
+			return invalidArgf("%d open merge request(s) use %q as source branch (e.g. %s), and GitLab cannot change an MR's source branch; "+
 				"merge or close them first, or rerun with --force (they lose their source branch and need to be recreated from %q)",
-				len(fromOld), oldName, fromOld[0].IID, newName)
+				len(fromOld), oldName, example, newName)
 		}
 	}
 
@@ -165,9 +175,32 @@ func bitbucketRetargetPRs(ctx context.Context, bb *bitbucketAPIClient, nfo *Info
 	return nil
 }
 
+// gitlabMRsFromBranch returns the open MRs whose source is branch of proj
+// (at path): MRs within proj and, for a fork, MRs into the project it was
+// forked from. MRs into proj from forks with a same-named branch do not count.
+func gitlabMRsFromBranch(gl *gitlab.Client, path string, proj *gitlab.Project, branch string) ([]*gitlab.BasicMergeRequest, error) {
+	targets := []any{path}
+	if proj.ForkedFromProject != nil && proj.ForkedFromProject.ID != 0 {
+		targets = append(targets, proj.ForkedFromProject.ID)
+	}
+	var out []*gitlab.BasicMergeRequest
+	for _, target := range targets {
+		mrs, err := gitlabOpenMRs(gl, target, &branch, nil)
+		if err != nil {
+			return nil, err
+		}
+		for _, mr := range mrs {
+			if mr.SourceProjectID == 0 || mr.SourceProjectID == proj.ID {
+				out = append(out, mr)
+			}
+		}
+	}
+	return out, nil
+}
+
 // gitlabOpenMRs lists the open MRs of a project with the given source
 // and/or target branch (nil: any).
-func gitlabOpenMRs(gl *gitlab.Client, project string, sourceBranch, targetBranch *string) ([]*gitlab.BasicMergeRequest, error) {
+func gitlabOpenMRs(gl *gitlab.Client, project any, sourceBranch, targetBranch *string) ([]*gitlab.BasicMergeRequest, error) {
 	opts := &gitlab.ListProjectMergeRequestsOptions{
 		ListOptions:  gitlab.ListOptions{PerPage: 100, Page: 1},
 		State:        new("opened"),
@@ -211,6 +244,11 @@ func retargetGitLabMRs(gl *gitlab.Client, project, oldTarget, newTarget string) 
 }
 
 func recreateGitLabMR(gl *gitlab.Client, project string, mr *gitlab.BasicMergeRequest, newTarget string) error {
+	if mr.SourceProjectID != mr.TargetProjectID {
+		// Created here, the new MR would use a same-named branch of this
+		// project instead of the fork's.
+		return fmt.Errorf("it comes from a fork, which gr does not recreate MRs for")
+	}
 	newMR, _, err := gl.MergeRequests.CreateMergeRequest(project, &gitlab.CreateMergeRequestOptions{
 		Title:        new(mr.Title),
 		SourceBranch: new(mr.SourceBranch),
