@@ -70,17 +70,39 @@ func prMergeGitHub(ctx context.Context, nfo *Info, number int, opts MergeOptions
 	}
 	if opts.DeleteBranch != nil && *opts.DeleteBranch {
 		// Unlike GitLab and Bitbucket, GitHub's merge API cannot delete the
-		// head branch. Delete it in the repository it lives in (maybe a fork).
-		head := pr.GetHead()
-		owner, repo := head.GetRepo().GetOwner().GetLogin(), head.GetRepo().GetName()
-		if owner == "" || repo == "" {
-			return d, fmt.Errorf("PR #%d merged, but its head repository no longer exists; branch %q not deleted", number, head.GetRef())
-		}
-		if _, err := gh.Git.DeleteRef(ctx, owner, repo, "heads/"+head.GetRef()); err != nil {
-			return d, fmt.Errorf("PR #%d merged, but deleting branch %q failed: %w", number, head.GetRef(), err)
+		// head branch.
+		if err := githubDeleteHeadBranch(ctx, gh, pr); err != nil {
+			return d, fmt.Errorf("PR #%d merged, but %w", number, err)
 		}
 	}
 	return d, nil
+}
+
+// githubDeleteHeadBranch deletes the head branch of a PR in the repository
+// it lives in, which may be a fork. A branch that is already gone (e.g.
+// deleted automatically after merging) counts as deleted.
+func githubDeleteHeadBranch(ctx context.Context, gh *githublib.Client, pr *githublib.PullRequest) error {
+	head := pr.GetHead()
+	owner, repo := head.GetRepo().GetOwner().GetLogin(), head.GetRepo().GetName()
+	if owner == "" || repo == "" {
+		return fmt.Errorf("its head repository no longer exists; branch %q not deleted", head.GetRef())
+	}
+	if head.GetRef() == head.GetRepo().GetDefaultBranch() {
+		return fmt.Errorf("branch %q is the default branch of %s/%s; not deleted", head.GetRef(), owner, repo)
+	}
+	_, err := gh.Git.DeleteRef(ctx, owner, repo, "heads/"+head.GetRef())
+	if err != nil && !githubRefGone(err) {
+		return fmt.Errorf("deleting branch %q failed: %w", head.GetRef(), err)
+	}
+	return nil
+}
+
+// githubRefGone reports whether a ref deletion failed because the ref does
+// not exist (HTTP 422 "Reference does not exist").
+func githubRefGone(err error) bool {
+	ge, ok := errors.AsType[*githublib.ErrorResponse](err)
+	return ok && ge.Response != nil && ge.Response.StatusCode == http.StatusUnprocessableEntity &&
+		strings.Contains(strings.ToLower(ge.Message), "reference does not exist")
 }
 
 func prMergeGitLab(ctx context.Context, nfo *Info, number int, opts MergeOptions) (*PRDetails, error) {

@@ -85,9 +85,27 @@ func TestBitbucketPrMergeAndClose(t *testing.T) {
 
 	f.reply("POST /repositories/workspace/repo/pullrequests/8/decline", http.StatusOK,
 		strings.Replace(strings.Replace(bitbucketPR7, `"OPEN"`, `"DECLINED"`, 1), `"id":7`, `"id":8`, 1))
-	d, err = ProviderBitbucket.PrClose(t.Context(), info, 8)
+	d, err = ProviderBitbucket.PrClose(t.Context(), info, 8, CloseOptions{})
 	if err != nil || d.Number != 8 || d.State != "closed" || d.ProviderState != "declined" {
 		t.Errorf("close = %+v, %v", d, err)
+	}
+}
+
+// TestBitbucketPrCloseDeletesForkBranch deletes the source branch in the
+// fork, not a same-named branch of the destination repository.
+func TestBitbucketPrCloseDeletesForkBranch(t *testing.T) {
+	f, info := fakeBitbucketAPI(t)
+	declined := strings.Replace(strings.Replace(bitbucketPR7, `"OPEN"`, `"DECLINED"`, 1),
+		`"source":{"branch":{"name":"feature/z"}}`,
+		`"source":{"branch":{"name":"feature/z"},"repository":{"full_name":"alice/repo-fork"}}`, 1)
+	f.reply("POST /repositories/workspace/repo/pullrequests/7/decline", http.StatusOK, declined)
+	f.reply("GET /repositories/alice/repo-fork", http.StatusOK, `{"mainbranch":{"name":"main"}}`)
+	f.reply("DELETE /repositories/alice/repo-fork/refs/branches/feature/z", http.StatusNoContent, ``)
+	if _, err := ProviderBitbucket.PrClose(t.Context(), info, 7, CloseOptions{DeleteBranch: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !f.called("DELETE /repositories/alice/repo-fork/refs/branches/feature/z") {
+		t.Error("fork branch not deleted")
 	}
 }
 

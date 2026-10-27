@@ -57,8 +57,12 @@ gr pr merge --method squash --delete-branch
 commit); without it the repository's default applies. GitLab has no per-merge
 rebase: its project setting decides between merge commits and fast-forward.
 `--delete-branch`/`--keep-branch` override the PR's own setting (PRs created by
-`gr pr create` are set to delete their branch). A merge that Bitbucket queues
-is reported as not merged yet.
+`gr pr create` are set to delete their branch). The branch is deleted in the
+repository it lives in, which may be a fork; a branch that is already gone
+counts as deleted. On GitHub, `--keep-branch` cannot stop the repository's
+"Automatically delete head branches" setting. A merge that Bitbucket queues
+is reported as not merged yet. `gr pr close --delete-branch` deletes the
+source branch the same way.
 
 ### Renaming branches
 

@@ -180,30 +180,22 @@ func prClose(ctx context.Context, info *provider.Info, cmd *PRCloseCmd) error {
 	if err != nil {
 		return err
 	}
-	res, err := info.Provider.PrClose(ctx, info, number)
-	if err != nil {
+	res, err := info.Provider.PrClose(ctx, info, number, provider.CloseOptions{DeleteBranch: cmd.DeleteBranch})
+	if res == nil {
 		return err
 	}
-	var deleteErr error
-	deleted := false
-	if cmd.DeleteBranch && res != nil && strings.TrimSpace(res.Head) != "" {
-		deleteErr = info.Provider.BranchDelete(ctx, info, res.Head, provider.BranchDeleteOptions{Force: false})
-		deleted = deleteErr == nil
-	}
+	// A non-nil result with an error means closed, but branch deletion failed.
 	if cmd.JSON {
-		if err := printJSON(res); err != nil {
-			return err
+		if jerr := printJSON(res); jerr != nil {
+			return jerr
 		}
 	} else {
 		fmt.Printf("PR #%d %s.\n", number, formatState(res.State, res.ProviderState, false))
-		if deleted {
-			fmt.Printf("Deleted remote branch %q.\n", res.Head)
+		if cmd.DeleteBranch && err == nil {
+			fmt.Printf("Deleted source branch %q.\n", res.Head)
 		}
 	}
-	if deleteErr != nil {
-		return fmt.Errorf("PR #%d closed, but deleting branch %q failed: %w", number, res.Head, deleteErr)
-	}
-	return nil
+	return err
 }
 
 func prComments(ctx context.Context, info *provider.Info, cmd *PRCommentsCmd) error {

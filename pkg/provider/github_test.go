@@ -94,14 +94,59 @@ func TestGitHubPrMergeDeletesBranch(t *testing.T) {
 	}
 }
 
-func TestGitHubPrMergeReportsFailedBranchDeletion(t *testing.T) {
+func TestGitHubPrMergeBranchDeletionErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		message string
+		wantErr bool
+	}{
+		{"already deleted", http.StatusUnprocessableEntity, "Reference does not exist", false},
+		{"forbidden", http.StatusForbidden, "Resource not accessible by integration", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, info := fakeGitHub(t)
+			f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, githubPR7)
+			f.reply("PUT /api/v3/repos/owner/repo/pulls/7/merge", http.StatusOK, `{"merged":true}`)
+			f.reply("DELETE /api/v3/repos/owner/repo/git/refs/heads/feature/x", tc.status, `{"message":"`+tc.message+`"}`)
+			d, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: new(true)})
+			if d == nil {
+				t.Fatalf("merged PR not returned: %v", err)
+			}
+			if gotErr := err != nil && strings.Contains(err.Error(), "merged, but deleting branch"); gotErr != tc.wantErr {
+				t.Errorf("err = %v, want error: %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestGitHubPrMergeKeepsDefaultBranchOfFork(t *testing.T) {
 	f, info := fakeGitHub(t)
-	f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, githubPR7)
+	pr := strings.Replace(githubPR7, `"head":{"ref":"feature/x","sha":"abc","repo":{"name":"repo","owner":{"login":"owner"}}}`,
+		`"head":{"ref":"main","sha":"abc","repo":{"name":"fork","owner":{"login":"alice"},"default_branch":"main"}}`, 1)
+	f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, pr)
 	f.reply("PUT /api/v3/repos/owner/repo/pulls/7/merge", http.StatusOK, `{"merged":true}`)
-	f.reply("DELETE /api/v3/repos/owner/repo/git/refs/heads/feature/x", http.StatusUnprocessableEntity, `{"message":"Reference does not exist"}`)
-	d, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: new(true)})
-	if d == nil || err == nil || !strings.Contains(err.Error(), "merged, but deleting branch") {
-		t.Errorf("got %v, %v", d, err)
+	_, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: new(true)})
+	if err == nil || !strings.Contains(err.Error(), "default branch") {
+		t.Errorf("err = %v, want refusal to delete the default branch", err)
+	}
+}
+
+// TestGitHubPrCloseDeletesForkBranch deletes the head branch in the fork,
+// not a same-named branch of the base repository.
+func TestGitHubPrCloseDeletesForkBranch(t *testing.T) {
+	f, info := fakeGitHub(t)
+	pr := strings.Replace(strings.Replace(githubPR7, `"state":"open"`, `"state":"closed"`, 1),
+		`"head":{"ref":"feature/x","sha":"abc","repo":{"name":"repo","owner":{"login":"owner"}}}`,
+		`"head":{"ref":"feature/x","sha":"abc","repo":{"name":"fork","owner":{"login":"alice"},"default_branch":"main"}}`, 1)
+	f.reply("PATCH /api/v3/repos/owner/repo/pulls/7", http.StatusOK, pr)
+	f.reply("DELETE /api/v3/repos/alice/fork/git/refs/heads/feature/x", http.StatusNoContent, ``)
+	d, err := ProviderGitHub.PrClose(t.Context(), info, 7, CloseOptions{DeleteBranch: true})
+	if err != nil || d.State != StateClosed {
+		t.Fatalf("close = %+v, %v", d, err)
+	}
+	if !f.called("DELETE /api/v3/repos/alice/fork/git/refs/heads/feature/x") {
+		t.Error("fork branch not deleted")
 	}
 }
 

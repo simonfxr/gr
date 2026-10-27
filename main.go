@@ -89,14 +89,14 @@ type PRMergeCmd struct {
 	PRSelector
 	Method       string `arg:"--method" help:"merge method: merge, squash or rebase (default: the repository's; GitLab: no rebase)"`
 	DeleteBranch bool   `arg:"--delete-branch" help:"delete the source branch after merging"`
-	KeepBranch   bool   `arg:"--keep-branch" help:"keep the source branch, even if the PR is set to delete it"`
+	KeepBranch   bool   `arg:"--keep-branch" help:"keep the source branch, even if the PR is set to delete it (GitHub: unless the repository deletes head branches automatically)"`
 	JSON         bool   `arg:"--json" help:"output as JSON"`
 }
 
 type PRCloseCmd struct {
 	PR string `arg:"positional" help:"pull request number or URL"`
 	PRSelector
-	DeleteBranch bool `arg:"--delete-branch" help:"delete source branch after closing"`
+	DeleteBranch bool `arg:"--delete-branch" help:"delete the source branch after closing (in the fork, for PRs from forks)"`
 	JSON         bool `arg:"--json" help:"output as JSON"`
 }
 

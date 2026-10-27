@@ -13,6 +13,27 @@ const gitlabMR5 = `{"iid":5,"title":"Add y","description":"desc","state":"opened
 	"source_branch":"feature/y","target_branch":"main",
 	"web_url":"https://gitlab.example/group/sub/proj/-/merge_requests/5"}`
 
+// TestGitLabPrCloseDeletesForkBranch deletes the source branch in the
+// source project, which differs from the target project for fork MRs.
+func TestGitLabPrCloseDeletesForkBranch(t *testing.T) {
+	f, info := fakeGitLab(t)
+	closed := strings.Replace(gitlabMR5, `"state":"opened"`, `"state":"closed","source_project_id":42,"target_project_id":7`, 1)
+	f.handle("PUT /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5", func(w http.ResponseWriter, r *http.Request) {
+		if got := decodeJSON(t, r); got["state_event"] != "close" {
+			t.Errorf("payload = %v", got)
+		}
+		writeJSON(w, http.StatusOK, closed)
+	})
+	f.reply("DELETE /api/v4/projects/42/repository/branches/feature%2Fy", http.StatusNoContent, ``)
+	d, err := ProviderGitLab.PrClose(t.Context(), info, 5, CloseOptions{DeleteBranch: true})
+	if err != nil || d.State != StateClosed {
+		t.Fatalf("close = %+v, %v", d, err)
+	}
+	if !f.called("DELETE /api/v4/projects/42/repository/branches/feature%2Fy") {
+		t.Error("source branch not deleted in the source project")
+	}
+}
+
 func TestGitLabPrView(t *testing.T) {
 	f, info := fakeGitLab(t)
 	f.reply("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5", http.StatusOK, gitlabMR5)
