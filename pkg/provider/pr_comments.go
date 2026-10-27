@@ -18,7 +18,10 @@ type PRComment struct {
 	Author    string    `json:"author"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
-	Resolved  bool      `json:"resolved"`
+	// Resolvable is set on thread roots that can be resolved; Resolved
+	// then tells whether the thread is.
+	Resolvable bool `json:"resolvable"`
+	Resolved   bool `json:"resolved"`
 	// Optional location for inline comments (when available)
 	Path string `json:"path,omitempty"`
 	Line int    `json:"line,omitempty"`
@@ -36,7 +39,7 @@ func (p Provider) PrComments(ctx context.Context, nfo *Info, number int) ([]PRCo
 	case ProviderGitLab:
 		return prCommentsGitLab(ctx, nfo, number)
 	case ProviderGitHub:
-		return nil, errors.New("pr comments: GitHub backend not implemented yet")
+		return nil, unsupported("pr comments", p)
 	case ProviderBitbucket:
 		return prCommentsBitbucket(ctx, nfo, number)
 	default:
@@ -75,7 +78,7 @@ func prCommentsGitLab(ctx context.Context, nfo *Info, number int) ([]PRComment, 
 			if n.CreatedAt != nil {
 				created = *n.CreatedAt
 			}
-			pc := PRComment{ID: int(n.ID), Author: author, Body: n.Body, CreatedAt: created, Resolved: n.Resolved}
+			pc := PRComment{ID: int(n.ID), Author: author, Body: n.Body, CreatedAt: created, Resolvable: n.Resolvable, Resolved: n.Resolved}
 			// Try to attach path/line when available via Position
 			if n.Position != nil {
 				if p := n.Position.NewPath; p != "" {
@@ -182,6 +185,8 @@ func (c *bitbucketComment) toPRComment() PRComment {
 	}
 	if c.Parent != nil {
 		out.ParentID = c.Parent.ID
+	} else {
+		out.Resolvable = true // Bitbucket resolves top-level comment threads
 	}
 	return out
 }

@@ -33,9 +33,9 @@ func (p Provider) PrAddComment(ctx context.Context, nfo *Info, number int, opts 
 			"inline":  map[string]any{"to": opts.Line, "path": opts.Path},
 		})
 	case ProviderGitHub:
-		return nil, errors.New("pr addcomment: GitHub backend not implemented yet")
+		return nil, unsupported("pr addcomment", p)
 	case ProviderGitLab:
-		return nil, errors.New("pr addcomment: GitLab backend not implemented yet")
+		return nil, unsupported("pr addcomment", p)
 	default:
 		return nil, fmt.Errorf("unknown provider: %v", p)
 	}

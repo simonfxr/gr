@@ -54,6 +54,25 @@ func missingToken(name, env, section string) error {
 	return &AuthError{msg: fmt.Sprintf("%s token not configured (set %s, or token or credential_helper under [%s] in ~/.config/gr/config.toml)", name, env, section)}
 }
 
+// UnsupportedError reports an operation that a provider does not offer,
+// such as tasks outside Bitbucket.
+type UnsupportedError struct {
+	Op       string // e.g. "PR tasks"
+	Provider Provider
+}
+
+func (e *UnsupportedError) Error() string {
+	return fmt.Sprintf("%s: not supported on %s", e.Op, e.Provider)
+}
+
+// IsUnsupported reports whether err is an UnsupportedError.
+func IsUnsupported(err error) bool {
+	_, ok := errors.AsType[*UnsupportedError](err)
+	return ok
+}
+
+func unsupported(op string, p Provider) error { return &UnsupportedError{Op: op, Provider: p} }
+
 // InvalidArgumentError reports a caller error detected before contacting the
 // provider (e.g. an empty body or unknown filter value).
 type InvalidArgumentError struct{ msg string }

@@ -28,6 +28,7 @@ const (
 	kindAmbiguous   = "ambiguous"
 	kindInterrupted = "interrupted"
 	kindAuth        = "auth"
+	kindUnsupported = "unsupported" // operation not offered by the provider
 )
 
 // cliError is an error with a machine-readable kind.
@@ -55,6 +56,9 @@ func errorKind(err error) string {
 	if _, ok := errors.AsType[*provider.InvalidArgumentError](err); ok {
 		return kindUsage
 	}
+	if provider.IsUnsupported(err) {
+		return kindUnsupported
+	}
 	if provider.IsAuthError(err) {
 		return kindAuth
 	}
@@ -66,7 +70,7 @@ func errorKind(err error) string {
 
 func exitCode(err error) int {
 	switch errorKind(err) {
-	case kindUsage:
+	case kindUsage, kindUnsupported:
 		return exitUsage
 	case kindNotFound, kindAmbiguous:
 		return exitNotFound

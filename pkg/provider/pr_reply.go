@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -22,6 +21,6 @@ func (p Provider) PrReplyComment(ctx context.Context, nfo *Info, number, comment
 			"parent":  map[string]any{"id": commentID},
 		})
 	default:
-		return nil, fmt.Errorf("pr reply: %s backend not implemented yet", p)
+		return nil, unsupported("pr reply", p)
 	}
 }

@@ -76,12 +76,13 @@ MSG
 
 ### Scripting and agents
 
-- **Exit status:** `0` success, `1` error, `2` invalid usage, `3` PR/comment/task
+- **Exit status:** `0` success, `1` error, `2` invalid usage or an operation the
+  provider does not support (e.g. tasks outside Bitbucket), `3` PR/comment/task
   not found or PR selection ambiguous, `4` missing or rejected credentials,
   `130` interrupted (Ctrl-C cancels in-flight requests). Empty listings exit `0`.
 - **JSON:** `--json` is available on every command that produces data; field
   names are snake_case. With `--json`, errors are written to stderr as
-  `{"error": "...", "kind": "usage|not_found|ambiguous|auth|interrupted|error", "exit_code": N}`;
+  `{"error": "...", "kind": "usage|unsupported|not_found|ambiguous|auth|interrupted|error", "exit_code": N}`;
   ambiguous PR selection adds `"candidates"` (the matching PRs).
 - **PR states:** `state` is `open`, `closed` (closed without merging) or
   `merged` on every provider; `provider_state` keeps the provider's own value

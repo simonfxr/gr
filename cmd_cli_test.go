@@ -191,6 +191,11 @@ func TestProviderErrorsMapToExitCodes(t *testing.T) {
 	if exitCode(err) != exitUsage {
 		t.Errorf("invalid state: got %v (exit %d)", err, exitCode(err))
 	}
+	gitlab := &provider.Info{Provider: provider.ProviderGitLab, Owner: "g", Repo: "r"}
+	err = runPR(t.Context(), &PRCmd{Tasks: &PRTasksCmd{Number: "1"}}, gitlab)
+	if errorKind(err) != kindUnsupported || exitCode(err) != exitUsage {
+		t.Errorf("tasks on GitLab: got %v (kind %s, exit %d)", err, errorKind(err), exitCode(err))
+	}
 }
 
 func TestWantsJSON(t *testing.T) {
@@ -297,11 +302,12 @@ func TestReplyAndAddCommentPayloads(t *testing.T) {
 func TestBuildTodo(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 10, 27, 10, min, 0, 0, time.UTC) }
 	comments := []provider.PRComment{
-		{ID: 1, Author: "rev", Body: "rename this", Path: "a.go", Line: 3, CreatedAt: at(1)},
+		{ID: 1, Author: "rev", Body: "rename this", Path: "a.go", Line: 3, CreatedAt: at(1), Resolvable: true},
 		{ID: 2, Author: "me", Body: "why?", ParentID: 1, CreatedAt: at(5)},
 		{ID: 3, Author: "rev", Body: "because", ParentID: 2, CreatedAt: at(6)},
-		{ID: 4, Author: "rev", Body: "fixed already", Resolved: true, CreatedAt: at(2)},
-		{ID: 5, Author: "rev", Body: "general remark", CreatedAt: at(0)},
+		{ID: 4, Author: "rev", Body: "fixed already", Resolvable: true, Resolved: true, CreatedAt: at(2)},
+		{ID: 5, Author: "rev", Body: "general remark", CreatedAt: at(0), Resolvable: true},
+		{ID: 6, Author: "rev", Body: "plain note, cannot be resolved", CreatedAt: at(0)},
 	}
 	tasks := []provider.PRTask{
 		{ID: 10, Body: "task on reply", CommentID: 3, Creator: "rev", CreatedAt: at(7)},

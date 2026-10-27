@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 )
@@ -17,7 +16,7 @@ func (p Provider) PrResolveComment(ctx context.Context, nfo *Info, number, comme
 	case ProviderBitbucket:
 		return prResolveCommentBitbucket(ctx, nfo, number, commentID)
 	default:
-		return fmt.Errorf("pr resolve: %s backend not implemented yet", p)
+		return unsupported("pr resolve", p)
 	}
 }
 

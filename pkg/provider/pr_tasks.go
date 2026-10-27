@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -49,7 +48,7 @@ func (p Provider) PrTasks(ctx context.Context, nfo *Info, number int, opts TaskL
 	case ProviderBitbucket:
 		return prTasksBitbucket(ctx, nfo, number, opts)
 	default:
-		return nil, fmt.Errorf("pr tasks: %s backend not implemented yet", p)
+		return nil, unsupported("PR tasks (a Bitbucket feature)", p)
 	}
 }
 
@@ -65,7 +64,7 @@ func (p Provider) PrAddTask(ctx context.Context, nfo *Info, number int, opts Add
 	case ProviderBitbucket:
 		return prAddTaskBitbucket(ctx, nfo, number, opts)
 	default:
-		return nil, fmt.Errorf("pr addtask: %s backend not implemented yet", p)
+		return nil, unsupported("PR tasks (a Bitbucket feature)", p)
 	}
 }
 
@@ -78,7 +77,7 @@ func (p Provider) PrSetTaskResolved(ctx context.Context, nfo *Info, number, task
 	case ProviderBitbucket:
 		return prSetTaskResolvedBitbucket(ctx, nfo, number, taskID, resolved)
 	default:
-		return nil, fmt.Errorf("pr resolvetask: %s backend not implemented yet", p)
+		return nil, unsupported("PR tasks (a Bitbucket feature)", p)
 	}
 }
 

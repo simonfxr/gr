@@ -201,7 +201,7 @@ func (Args) Description() string {
 }
 
 func (Args) Epilogue() string {
-	return "Exit status: 0 success, 1 error, 2 invalid usage, 3 pull request/comment/task not found or ambiguous, 4 missing or rejected credentials, 130 interrupted.\n" +
+	return "Exit status: 0 success, 1 error, 2 invalid usage or unsupported by the provider, 3 pull request/comment/task not found or ambiguous, 4 missing or rejected credentials, 130 interrupted.\n" +
 		"With --json, errors are printed to stderr as JSON: {error, kind, exit_code, candidates}."
 }
 

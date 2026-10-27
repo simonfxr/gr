@@ -13,8 +13,8 @@ import (
 	"github.com/simonfxr/gr/tables"
 )
 
-// todoItem is one thing left to do on a PR: an open task or an unresolved
-// top-level comment thread. Act on it, then close it with
+// todoItem is one thing left to do on a PR: an open task or an unresolved,
+// resolvable comment thread. Act on it, then close it with
 // `gr pr resolvetask ID` (tasks) or `gr pr resolve ID` (comments).
 type todoItem struct {
 	Kind      string    `json:"kind"` // "task" or "comment"
@@ -58,7 +58,7 @@ func prTodo(ctx context.Context, info *provider.Info, cmd *PRTodoCmd) error {
 	if commentErr != nil {
 		return commentErr
 	}
-	if taskErr != nil {
+	if taskErr != nil && !provider.IsUnsupported(taskErr) { // tasks are Bitbucket-only
 		return taskErr
 	}
 	report := buildTodo(number, comments, tasks)
@@ -91,8 +91,9 @@ func prTodo(ctx context.Context, info *provider.Info, cmd *PRTodoCmd) error {
 }
 
 // buildTodo merges open tasks and unresolved comment threads into one
-// chronological list. Resolution in Bitbucket applies to top-level comments,
-// so replies are attached to their thread instead of being listed separately.
+// chronological list. Resolution applies to whole threads, so replies are
+// attached to their thread instead of being listed separately. Comments that
+// cannot be resolved (e.g. plain GitLab notes) are not todo items.
 func buildTodo(number int, comments []provider.PRComment, openTasks []provider.PRTask) todoReport {
 	byID := make(map[int]provider.PRComment, len(comments))
 	for _, c := range comments {
@@ -139,7 +140,7 @@ func buildTodo(number int, comments []provider.PRComment, openTasks []provider.P
 		report.OpenTasks++
 	}
 	for _, c := range comments {
-		if c.ParentID > 0 || c.Resolved {
+		if c.ParentID > 0 || c.Resolved || !c.Resolvable {
 			continue
 		}
 		thread := replies[c.ID]
