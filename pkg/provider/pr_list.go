@@ -265,7 +265,7 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 const bitbucketPRMaxPageSize = 50
 
 func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRequest, error) {
-	bb, err := newBitbucketListingClient(nfo)
+	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +336,7 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 		return opts.Limit <= 0 || len(out) < opts.Limit
 	}
 	err = bitbucketListPages(ctx, bb, endpoint, params, collect)
-	var apiErr *bitbucketListingError
+	var apiErr *bitbucketAPIError
 	if authorName != "" && errors.As(err, &apiErr) && apiErr.status == http.StatusBadRequest {
 		// Some deployments reject queryable user-name fields. Retry without
 		// that optimization, keeping state/base/head and exact local matching.

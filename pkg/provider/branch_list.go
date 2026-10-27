@@ -136,7 +136,7 @@ func branchListRemoteGitLab(ctx context.Context, nfo *Info, opts BranchListOptio
 }
 
 func branchListRemoteBitbucket(ctx context.Context, nfo *Info, opts BranchListOptions) ([]BranchInfo, error) {
-	bb, err := newBitbucketListingClient(nfo)
+	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func branchListRemoteBitbucket(ctx context.Context, nfo *Info, opts BranchListOp
 	// Branch name filtering is documented, but support for nested fields can
 	// vary. Retry a rejected query with only that known-safe prefilter; all
 	// requested filters are enforced locally in either case.
-	var apiErr *bitbucketListingError
+	var apiErr *bitbucketAPIError
 	if query != nameQuery && errors.As(err, &apiErr) && apiErr.status == http.StatusBadRequest {
 		out = nil
 		params.Del("q")

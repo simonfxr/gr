@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,16 +13,18 @@ import (
 	"time"
 )
 
+// bitbucketAPIClient talks to the Bitbucket Cloud REST API directly.
 // Listings use explicit pagination: the SDK eagerly collects every page and
 // cannot express all the query/partial-response parameters these endpoints use.
-type bitbucketListingClient struct {
+// BITBUCKET_API_BASE_URL overrides the API root (used by tests).
+type bitbucketAPIClient struct {
 	baseURL *url.URL
 	http    *http.Client
 	user    string
 	token   string
 }
 
-func newBitbucketListingClient(nfo *Info) (*bitbucketListingClient, error) {
+func newBitbucketAPIClient(nfo *Info) (*bitbucketAPIClient, error) {
 	user, token, err := bitbucketCredentials(nfo)
 	if err != nil {
 		return nil, err
@@ -37,7 +40,7 @@ func newBitbucketListingClient(nfo *Info) (*bitbucketListingClient, error) {
 	if (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, fmt.Errorf("invalid bitbucket API URL")
 	}
-	return &bitbucketListingClient{
+	return &bitbucketAPIClient{
 		baseURL: u, user: user, token: token,
 		http: &http.Client{
 			Timeout: 30 * time.Second,
@@ -47,13 +50,13 @@ func newBitbucketListingClient(nfo *Info) (*bitbucketListingClient, error) {
 	}, nil
 }
 
-type bitbucketListingError struct {
+type bitbucketAPIError struct {
 	status int
 	body   string
 }
 
-func (e *bitbucketListingError) Error() string {
-	return fmt.Sprintf("bitbucket listing: HTTP %d: %s", e.status, e.body)
+func (e *bitbucketAPIError) Error() string {
+	return fmt.Sprintf("bitbucket API: HTTP %d: %s", e.status, e.body)
 }
 
 // JSON string quoting also escapes quotes, backslashes and control characters
@@ -63,7 +66,7 @@ func bitbucketQueryString(s string) string {
 	return string(b)
 }
 
-func bitbucketListPages[T any](ctx context.Context, c *bitbucketListingClient, endpoint string, params url.Values, visit func(T) bool) error {
+func bitbucketListPages[T any](ctx context.Context, c *bitbucketAPIClient, endpoint string, params url.Values, visit func(T) bool) error {
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return err
@@ -103,12 +106,38 @@ func bitbucketListPages[T any](ctx context.Context, c *bitbucketListingClient, e
 	}
 }
 
-func (c *bitbucketListingClient) get(ctx context.Context, address string, result any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+// endpointURL resolves an already path-escaped endpoint against the API base.
+func (c *bitbucketAPIClient) endpointURL(endpoint string) (string, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	return c.baseURL.ResolveReference(u).String(), nil
+}
+
+func (c *bitbucketAPIClient) get(ctx context.Context, address string, result any) error {
+	return c.do(ctx, http.MethodGet, address, nil, result)
+}
+
+// do sends a JSON request (payload may be nil) and decodes a 2xx JSON
+// response into result (which may be nil).
+func (c *bitbucketAPIClient) do(ctx context.Context, method, address string, payload, result any) error {
+	var body io.Reader
+	if payload != nil {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, address, body)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.user != "" {
 		req.SetBasicAuth(c.user, c.token)
 	} else {
@@ -119,12 +148,15 @@ func (c *bitbucketListingClient) get(ctx context.Context, address string, result
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &bitbucketListingError{status: resp.StatusCode, body: strings.TrimSpace(string(body))}
+		return &bitbucketAPIError{status: resp.StatusCode, body: strings.TrimSpace(string(body))}
+	}
+	if result == nil || resp.StatusCode == http.StatusNoContent {
+		return nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-		return fmt.Errorf("decode bitbucket listing: %w", err)
+		return fmt.Errorf("decode bitbucket response: %w", err)
 	}
 	return nil
 }

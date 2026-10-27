@@ -219,7 +219,7 @@ func TestBitbucketListingErrors(t *testing.T) {
 				http.Error(w, "failure", status)
 			})
 			_, err := prListBitbucket(context.Background(), info, ListOptions{Author: "Simon"})
-			var apiErr *bitbucketListingError
+			var apiErr *bitbucketAPIError
 			if !errors.As(err, &apiErr) || apiErr.status != status || requests != 1 {
 				t.Fatalf("requests=%d err=%v", requests, err)
 			}
