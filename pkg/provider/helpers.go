@@ -35,7 +35,12 @@ func githubClient(ctx context.Context, nfo *Info) (*githublib.Client, error) {
 			return nil, err
 		}
 		base += "/"
-		return githublib.NewEnterpriseClient(base, base, httpClient)
+		// GitHub Enterprise serves uploads at /api/uploads next to /api/v3.
+		uploads := base
+		if prefix, ok := strings.CutSuffix(base, "/api/v3/"); ok {
+			uploads = prefix + "/api/uploads/"
+		}
+		return githublib.NewEnterpriseClient(base, uploads, httpClient)
 	}
 	return githublib.NewClient(httpClient), nil
 }

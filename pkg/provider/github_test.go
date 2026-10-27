@@ -34,6 +34,20 @@ func TestGitHubPrView(t *testing.T) {
 	}
 }
 
+func TestGitHubEnterpriseURLs(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "t")
+	gh, err := githubClient(t.Context(), &Info{Provider: ProviderGitHub, Variant: "self-hosted", HTTPBase: "https://ghe.example/git"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := gh.BaseURL.String(), "https://ghe.example/git/api/v3/"; got != want {
+		t.Errorf("base URL = %s, want %s", got, want)
+	}
+	if got, want := gh.UploadURL.String(), "https://ghe.example/git/api/uploads/"; got != want {
+		t.Errorf("upload URL = %s, want %s", got, want)
+	}
+}
+
 func TestGitHubPrViewNotFound(t *testing.T) {
 	f, info := fakeGitHub(t)
 	f.reply("GET /api/v3/repos/owner/repo/pulls/9", http.StatusNotFound, `{"message":"Not Found"}`)
