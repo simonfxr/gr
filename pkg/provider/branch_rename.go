@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -85,149 +85,81 @@ func branchRenameGitLab(ctx context.Context, nfo *Info, oldName, newName string,
 }
 
 func branchRenameBitbucket(ctx context.Context, nfo *Info, oldName, newName string, opts BranchRenameOptions) error {
-	bb, err := bitbucketClient(nfo)
+	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return err
 	}
-
-	// Note: We will update PRs safely by preserving fields fetched from API.
 
 	// Find hash for old branch
-	b, err := bb.Repositories.Repository.GetBranch(&bitbucket.RepositoryBranchOptions{Owner: nfo.Owner, RepoSlug: nfo.Repo, BranchName: oldName})
-	if err != nil {
+	var branch struct {
+		Target struct {
+			Hash string `json:"hash"`
+		} `json:"target"`
+	}
+	if _, err := bb.call(ctx, http.MethodGet, bitbucketBranchEndpoint(nfo, oldName)+"?fields=target.hash", nil, &branch); err != nil {
 		return err
 	}
-	hash := ""
-	if b != nil && b.Target != nil {
-		if h, ok := b.Target["hash"].(string); ok {
-			hash = h
-		}
-	}
+	hash := branch.Target.Hash
 	if hash == "" {
 		hash = oldName
 	}
-	if _, err := bb.Repositories.Repository.CreateBranch(&bitbucket.RepositoryBranchCreationOptions{Owner: nfo.Owner, RepoSlug: nfo.Repo, Name: newName, Target: bitbucket.RepositoryBranchTarget{Hash: hash}}); err != nil {
+	create := map[string]any{"name": newName, "target": map[string]any{"hash": hash}}
+	if _, err := bb.call(ctx, http.MethodPost, bitbucketRepoEndpoint(nfo)+"/refs/branches", create, nil); err != nil {
 		return err
 	}
 
 	// Retarget destination branch on open PRs and also source branch where applicable.
 	if !opts.NoUpdatePRs {
-		// Destination retargeting
-		if err := bitbucketRetargetPRs(bb, nfo.Owner, nfo.Repo, fmt.Sprintf("destination.branch.name = \"%s\"", oldName), func(po *bitbucket.PullRequestsOptions) {
-			po.DestinationBranch = newName
+		if err := bitbucketRetargetPRs(ctx, bb, nfo, "destination.branch.name = "+bitbucketQueryString(oldName), func(pr *bitbucketPR) {
+			pr.Destination.Branch.Name = newName
 		}); err != nil {
 			return err
 		}
-		// Source retargeting
-		if err := bitbucketRetargetPRs(bb, nfo.Owner, nfo.Repo, fmt.Sprintf("source.branch.name = \"%s\"", oldName), func(po *bitbucket.PullRequestsOptions) {
-			po.SourceBranch = newName
+		if err := bitbucketRetargetPRs(ctx, bb, nfo, "source.branch.name = "+bitbucketQueryString(oldName), func(pr *bitbucketPR) {
+			pr.Source.Branch.Name = newName
 		}); err != nil {
 			return err
 		}
 	}
 
-	if err := bb.Repositories.Repository.DeleteBranch(&bitbucket.RepositoryBranchDeleteOptions{Owner: nfo.Owner, RepoSlug: nfo.Repo, RefName: oldName}); err != nil {
-		return err
-	}
-	return nil
+	_, err = bb.call(ctx, http.MethodDelete, bitbucketBranchEndpoint(nfo, oldName), nil, nil)
+	return err
 }
 
-// bitbucketRetargetPRs finds open PRs matching a query and updates them by preserving existing
-// fields while applying the provided mutate function to the update options (e.g., change source/destination branch).
-func bitbucketRetargetPRs(bb *bitbucket.Client, owner, repo, query string, mutate func(*bitbucket.PullRequestsOptions)) error {
-	res, err := bb.Repositories.PullRequests.Gets(&bitbucket.PullRequestsOptions{
-		Owner:    owner,
-		RepoSlug: repo,
-		States:   []string{"OPEN"},
-		Query:    query,
-	})
+// bitbucketRetargetPRs updates the open PRs matching a query after applying
+// mutate to their branches. The update repeats the PR's title, description,
+// reviewers and flags so that they are preserved.
+func bitbucketRetargetPRs(ctx context.Context, bb *bitbucketAPIClient, nfo *Info, query string, mutate func(*bitbucketPR)) error {
+	prs, err := bitbucketOpenPRs(ctx, bb, nfo, query)
 	if err != nil {
 		return err
 	}
-	m, ok := res.(map[string]any)
-	if !ok {
-		return nil
-	}
-	vals, _ := m["values"].([]any)
-	for _, it := range vals {
-		pr, _ := it.(map[string]any)
-		if pr == nil {
-			continue
-		}
-		// Fetch full PR to preserve fields
-		idStr := ""
-		if v, ok := pr["id"].(float64); ok {
-			idStr = fmt.Sprintf("%d", int(v))
-		}
-		if idStr == "" {
-			continue
-		}
-		full, err := bb.Repositories.PullRequests.Get(&bitbucket.PullRequestsOptions{Owner: owner, RepoSlug: repo, ID: idStr})
+	for _, listed := range prs {
+		pr, err := bitbucketGetPR(ctx, bb, nfo, listed.ID)
 		if err != nil {
 			return err
 		}
-		fp, ok := full.(map[string]any)
-		if !ok {
-			continue
-		}
-		// Extract and preserve fields
-		title, _ := fp["title"].(string)
-		description, _ := fp["description"].(string)
-		closeSource := false
-		if b, ok := fp["close_source_branch"].(bool); ok {
-			closeSource = b
-		}
-		draft := false
-		if b, ok := fp["draft"].(bool); ok {
-			draft = b
-		}
-		// Destination branch
-		destBranch := ""
-		if dst, ok := fp["destination"].(map[string]any); ok {
-			if br, ok := dst["branch"].(map[string]any); ok {
-				if name, ok := br["name"].(string); ok {
-					destBranch = name
-				}
+		mutate(pr)
+		reviewers := []map[string]string{}
+		for _, r := range pr.Reviewers {
+			if r.UUID != "" {
+				reviewers = append(reviewers, map[string]string{"uuid": r.UUID})
 			}
 		}
-		// Source repo full name (for forks)
-		sourceRepo := ""
-		if src, ok := fp["source"].(map[string]any); ok {
-			if r, ok := src["repository"].(map[string]any); ok {
-				if fn, ok := r["full_name"].(string); ok {
-					sourceRepo = fn
-				}
-			}
+		source := map[string]any{"branch": map[string]any{"name": pr.Source.Branch.Name}}
+		if pr.Source.Repository.FullName != "" {
+			source["repository"] = map[string]any{"full_name": pr.Source.Repository.FullName}
 		}
-		// Reviewers UUIDs
-		reviewers := []string{}
-		if rvs, ok := fp["reviewers"].([]any); ok {
-			for _, rv := range rvs {
-				if m, ok := rv.(map[string]any); ok {
-					if uuid, ok := m["uuid"].(string); ok && uuid != "" {
-						reviewers = append(reviewers, uuid)
-					}
-				}
-			}
+		payload := map[string]any{
+			"title":               pr.Title,
+			"description":         pr.Description,
+			"close_source_branch": pr.CloseSourceBranch,
+			"draft":               pr.Draft,
+			"reviewers":           reviewers,
+			"source":              source,
+			"destination":         map[string]any{"branch": map[string]any{"name": pr.Destination.Branch.Name}},
 		}
-
-		// Prepare update options preserving fields
-		po := &bitbucket.PullRequestsOptions{
-			Owner:             owner,
-			RepoSlug:          repo,
-			ID:                idStr,
-			Title:             title,
-			Description:       description,
-			CloseSourceBranch: closeSource,
-			Reviewers:         reviewers,
-			Draft:             draft,
-			DestinationBranch: destBranch,
-			SourceRepository:  sourceRepo,
-		}
-		// Apply mutation (change destination or source branch)
-		mutate(po)
-
-		if _, err := bb.Repositories.PullRequests.Update(po); err != nil {
+		if _, err := bb.call(ctx, http.MethodPut, bitbucketPREndpoint(nfo, pr.ID), payload, nil); err != nil {
 			return err
 		}
 	}

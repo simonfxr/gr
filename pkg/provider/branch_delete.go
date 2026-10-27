@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	githublib "github.com/google/go-github/v74/github"
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 )
 
 type BranchDeleteOptions struct {
@@ -44,7 +44,7 @@ func (p Provider) BranchDelete(ctx context.Context, nfo *Info, name string, opts
 				return fmt.Errorf("refusing to delete default branch %q (use --force)", name)
 			}
 		case ProviderBitbucket:
-			bb, err := bitbucketClient(nfo)
+			bb, err := newBitbucketAPIClient(nfo)
 			if err != nil {
 				return err
 			}
@@ -96,9 +96,10 @@ func branchDeleteGitLab(ctx context.Context, nfo *Info, name string) error {
 }
 
 func branchDeleteBitbucket(ctx context.Context, nfo *Info, name string) error {
-	bb, err := bitbucketClient(nfo)
+	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return err
 	}
-	return bb.Repositories.Repository.DeleteBranch(&bitbucket.RepositoryBranchDeleteOptions{Owner: nfo.Owner, RepoSlug: nfo.Repo, RefName: name})
+	_, err = bb.call(ctx, http.MethodDelete, bitbucketBranchEndpoint(nfo, name), nil, nil)
+	return err
 }

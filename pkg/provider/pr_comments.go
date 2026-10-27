@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -185,10 +184,4 @@ func (c *bitbucketComment) toPRComment() PRComment {
 		out.ParentID = c.Parent.ID
 	}
 	return out
-}
-
-// bitbucketPREndpoint returns the path-escaped API path of a pull request.
-func bitbucketPREndpoint(nfo *Info, number int) string {
-	return "repositories/" + url.PathEscape(nfo.Owner) + "/" + url.PathEscape(nfo.Repo) +
-		"/pullrequests/" + strconv.Itoa(number)
 }

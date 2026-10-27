@@ -29,7 +29,7 @@
           pname = "gr";
           version = "0.1.0";
           inherit src;
-          vendorHash = "sha256-TfitwuwFA3qoOX01Cdtv8DOYVR/ItlQ515rUbyw1haE=";
+          vendorHash = "sha256-Bd6aPaJJhVK4VVjjDpCAKeE+PHUpyV9bvtuclfdsBio=";
         };
 
         devShells.default = pkgs.mkShell {

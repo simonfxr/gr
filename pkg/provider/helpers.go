@@ -15,7 +15,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	githublib "github.com/google/go-github/v74/github"
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"golang.org/x/oauth2"
 
@@ -66,19 +65,7 @@ func gitlabClient(nfo *Info) (*gitlab.Client, error) {
 	return gitlab.NewClient(token)
 }
 
-// bitbucketClient returns a Bitbucket Cloud client using token from config/env.
-func bitbucketClient(nfo *Info) (*bitbucket.Client, error) {
-	user, token, err := bitbucketCredentials(nfo)
-	if err != nil {
-		return nil, err
-	}
-	if user != "" {
-		return bitbucket.NewBasicAuth(user, token)
-	}
-	return bitbucket.NewOAuthbearerToken(token)
-}
-
-// bitbucketCredentials is shared by the SDK and the explicit listing client.
+// bitbucketCredentials returns the Bitbucket Cloud username (may be empty) and token.
 func bitbucketCredentials(nfo *Info) (string, string, error) {
 	if nfo != nil && nfo.Provider == ProviderBitbucket && nfo.Variant == "self-hosted" {
 		return "", "", errors.New("bitbucket server is not supported yet")
@@ -138,22 +125,6 @@ func DefaultBranchGitLab(ctx context.Context, gl *gitlab.Client, nfo *Info) (str
 
 	if proj.DefaultBranch != "" {
 		return proj.DefaultBranch, nil
-	}
-	return "main", nil
-}
-
-// DefaultBranchBitbucket returns the main branch (default) for a Bitbucket Cloud repository.
-func DefaultBranchBitbucket(ctx context.Context, bb *bitbucket.Client, nfo *Info) (string, error) {
-	_ = ctx
-	repo, err := bb.Repositories.Repository.Get(&bitbucket.RepositoryOptions{
-		Owner:    nfo.Owner,
-		RepoSlug: nfo.Repo,
-	})
-	if err != nil {
-		return "", err
-	}
-	if repo != nil && repo.Mainbranch.Name != "" {
-		return repo.Mainbranch.Name, nil
 	}
 	return "main", nil
 }

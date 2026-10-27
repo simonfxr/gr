@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
-	"time"
 
 	githublib "github.com/google/go-github/v74/github"
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -147,7 +146,7 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 }
 
 func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetails, error) {
-	bb, err := bitbucketClient(nfo)
+	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return nil, err
 	}
@@ -169,19 +168,8 @@ func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDet
 	}
 
 	// Check existing open PR
-	query := fmt.Sprintf("source.branch.name = \"%s\"", head)
-	res, err := bb.Repositories.PullRequests.Gets(&bitbucket.PullRequestsOptions{
-		Owner:    nfo.Owner,
-		RepoSlug: nfo.Repo,
-		States:   []string{"OPEN"},
-		Query:    query,
-	})
-	if err == nil {
-		if m, ok := res.(map[string]any); ok {
-			if vals, _ := m["values"].([]any); len(vals) > 0 {
-				return nil, fmt.Errorf("a pull request already exists for branch %q", head)
-			}
-		}
+	if prs, err := bitbucketOpenPRs(ctx, bb, nfo, "source.branch.name = "+bitbucketQueryString(head)); err == nil && len(prs) > 0 {
+		return nil, fmt.Errorf("a pull request already exists for branch %q", head)
 	}
 
 	title, err := ResolvePRTitle(in.Title, nfo)
@@ -189,64 +177,17 @@ func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDet
 		return nil, err
 	}
 
-	po := &bitbucket.PullRequestsOptions{
-		Owner:             nfo.Owner,
-		RepoSlug:          nfo.Repo,
-		Title:             title,
-		Description:       in.Body,
-		SourceBranch:      head,
-		DestinationBranch: base,
-		Draft:             in.Draft,
-		CloseSourceBranch: in.DeleteAfterMerge,
+	payload := map[string]any{
+		"title":               title,
+		"description":         in.Body,
+		"source":              map[string]any{"branch": map[string]any{"name": head}},
+		"destination":         map[string]any{"branch": map[string]any{"name": base}},
+		"draft":               in.Draft,
+		"close_source_branch": in.DeleteAfterMerge,
 	}
-	createdRes, err := bb.Repositories.PullRequests.Create(po)
-	if err != nil {
+	var pr bitbucketPR
+	if _, err := bb.call(ctx, http.MethodPost, bitbucketRepoEndpoint(nfo)+"/pullrequests", payload, &pr); err != nil {
 		return nil, err
 	}
-	pr, ok := createdRes.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("unexpected response from bitbucket create")
-	}
-	// Parse into PRDetails
-	prTitle, _ := pr["title"].(string)
-	body, _ := pr["description"].(string)
-	state, _ := pr["state"].(string)
-	author := ""
-	if au, ok := pr["author"].(map[string]any); ok {
-		if n, ok := au["nickname"].(string); ok && n != "" {
-			author = n
-		} else if d, ok := au["display_name"].(string); ok {
-			author = d
-		}
-	}
-	createdStr, _ := pr["created_on"].(string)
-	updatedStr, _ := pr["updated_on"].(string)
-	created, _ := time.Parse(time.RFC3339, createdStr)
-	updated, _ := time.Parse(time.RFC3339, updatedStr)
-	url := ""
-	if links, ok := pr["links"].(map[string]any); ok {
-		if html, ok := links["html"].(map[string]any); ok {
-			if href, ok := html["href"].(string); ok {
-				url = href
-			}
-		}
-	}
-	num := 0
-	if v, ok := pr["id"].(float64); ok {
-		num = int(v)
-	}
-	return &PRDetails{
-		Number:    num,
-		Title:     prTitle,
-		Body:      body,
-		Author:    author,
-		State:     strings.ToLower(state),
-		CreatedAt: created,
-		UpdatedAt: updated,
-		Merged:    false,
-		Draft:     in.Draft,
-		Base:      base,
-		Head:      head,
-		URL:       url,
-	}, nil
+	return pr.toPRDetails(), nil
 }

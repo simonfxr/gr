@@ -290,21 +290,14 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 	}
 	params.Set("pagelen", strconv.Itoa(pageSize))
 	// Bitbucket Cloud does not have PR assignees; preserve existing behavior.
-	endpoint := "repositories/" + url.PathEscape(nfo.Owner) + "/" + url.PathEscape(nfo.Repo) + "/pullrequests"
+	endpoint := bitbucketRepoEndpoint(nfo) + "/pullrequests"
 	var out []PullRequest
-	collect := func(pr bitbucketListedPR) bool {
-		if authorName != "" && !strings.EqualFold(pr.Author.Nickname, authorName) && !strings.EqualFold(pr.Author.DisplayName, authorName) {
+	collect := func(pr bitbucketPR) bool {
+		if authorName != "" && (pr.Author == nil ||
+			!strings.EqualFold(pr.Author.Nickname, authorName) && !strings.EqualFold(pr.Author.DisplayName, authorName)) {
 			return true
 		}
-		author := pr.Author.Nickname
-		if author == "" {
-			author = pr.Author.DisplayName
-		}
-		created, _ := time.Parse(time.RFC3339, pr.CreatedOn)
-		out = append(out, PullRequest{
-			Number: pr.ID, Title: pr.Title, Author: author,
-			State: strings.ToLower(pr.State), CreatedAt: created, URL: pr.Links.HTML.Href,
-		})
+		out = append(out, pr.toPRDetails().Summary())
 		return opts.Limit <= 0 || len(out) < opts.Limit
 	}
 	err = bitbucketListPages(ctx, bb, endpoint, params, collect)
@@ -325,20 +318,4 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 		return nil, err
 	}
 	return out, nil
-}
-
-type bitbucketListedPR struct {
-	ID        int    `json:"id"`
-	Title     string `json:"title"`
-	State     string `json:"state"`
-	CreatedOn string `json:"created_on"`
-	Author    struct {
-		Nickname    string `json:"nickname"`
-		DisplayName string `json:"display_name"`
-	} `json:"author"`
-	Links struct {
-		HTML struct {
-			Href string `json:"href"`
-		} `json:"html"`
-	} `json:"links"`
 }

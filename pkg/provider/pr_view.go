@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	githublib "github.com/google/go-github/v74/github"
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -123,84 +121,13 @@ func (d *PRDetails) Summary() PullRequest {
 }
 
 func prViewBitbucket(ctx context.Context, nfo *Info, number int) (*PRDetails, error) {
-	bb, err := bitbucketClient(nfo)
+	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return nil, err
 	}
-	// Build options
-	po := &bitbucket.PullRequestsOptions{
-		Owner:    nfo.Owner,
-		RepoSlug: nfo.Repo,
-		ID:       fmt.Sprintf("%d", number),
-	}
-	_ = ctx
-	res, err := bb.Repositories.PullRequests.Get(po)
+	pr, err := bitbucketGetPR(ctx, bb, nfo, number)
 	if err != nil {
 		return nil, err
 	}
-	pr, ok := res.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("unexpected response from bitbucket")
-	}
-	// Extract fields
-	title, _ := pr["title"].(string)
-	body, _ := pr["description"].(string)
-	state, _ := pr["state"].(string)
-	author := ""
-	if au, ok := pr["author"].(map[string]any); ok {
-		if n, ok := au["nickname"].(string); ok && n != "" {
-			author = n
-		} else if d, ok := au["display_name"].(string); ok {
-			author = d
-		}
-	}
-	createdStr, _ := pr["created_on"].(string)
-	updatedStr, _ := pr["updated_on"].(string)
-	created, _ := time.Parse(time.RFC3339, createdStr)
-	updated, _ := time.Parse(time.RFC3339, updatedStr)
-	merged := strings.EqualFold(state, "MERGED")
-	// Branches
-	base := ""
-	head := ""
-	if dst, ok := pr["destination"].(map[string]any); ok {
-		if br, ok := dst["branch"].(map[string]any); ok {
-			if name, ok := br["name"].(string); ok {
-				base = name
-			}
-		}
-	}
-	if src, ok := pr["source"].(map[string]any); ok {
-		if br, ok := src["branch"].(map[string]any); ok {
-			if name, ok := br["name"].(string); ok {
-				head = name
-			}
-		}
-	}
-	url := ""
-	if links, ok := pr["links"].(map[string]any); ok {
-		if html, ok := links["html"].(map[string]any); ok {
-			if href, ok := html["href"].(string); ok {
-				url = href
-			}
-		}
-	}
-	// Number
-	num := number
-	if v, ok := pr["id"].(float64); ok {
-		num = int(v)
-	}
-	return &PRDetails{
-		Number:    num,
-		Title:     title,
-		Body:      body,
-		Author:    author,
-		State:     strings.ToLower(state),
-		CreatedAt: created,
-		UpdatedAt: updated,
-		Merged:    merged,
-		Draft:     false,
-		Base:      base,
-		Head:      head,
-		URL:       url,
-	}, nil
+	return pr.toPRDetails(), nil
 }

@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	githublib "github.com/google/go-github/v74/github"
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -18,9 +17,6 @@ func IsNotFound(err error) bool {
 	}
 	if bbAPI, ok := errors.AsType[*bitbucketAPIError](err); ok {
 		return bbAPI.status == http.StatusNotFound
-	}
-	if bbSDK, ok := errors.AsType[*bitbucket.UnexpectedResponseStatusError](err); ok {
-		return bbSDK.StatusCode == http.StatusNotFound
 	}
 	if gh, ok := errors.AsType[*githublib.ErrorResponse](err); ok {
 		return gh.Response != nil && gh.Response.StatusCode == http.StatusNotFound

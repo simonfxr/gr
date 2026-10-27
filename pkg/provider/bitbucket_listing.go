@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -122,17 +123,32 @@ func (c *bitbucketAPIClient) get(ctx context.Context, address string, result any
 // do sends a JSON request (payload may be nil) and decodes a 2xx JSON
 // response into result (which may be nil).
 func (c *bitbucketAPIClient) do(ctx context.Context, method, address string, payload, result any) error {
+	_, err := c.send(ctx, method, address, payload, result)
+	return err
+}
+
+// call is like do for an already path-escaped endpoint relative to the API
+// base, and also returns the HTTP status of a successful response.
+func (c *bitbucketAPIClient) call(ctx context.Context, method, endpoint string, payload, result any) (int, error) {
+	u, err := c.endpointURL(endpoint)
+	if err != nil {
+		return 0, err
+	}
+	return c.send(ctx, method, u, payload, result)
+}
+
+func (c *bitbucketAPIClient) send(ctx context.Context, method, address string, payload, result any) (int, error) {
 	var body io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		body = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, address, body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Accept", "application/json")
 	if payload != nil {
@@ -145,18 +161,38 @@ func (c *bitbucketAPIClient) do(ctx context.Context, method, address string, pay
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &bitbucketAPIError{status: resp.StatusCode, body: strings.TrimSpace(string(body))}
+		return resp.StatusCode, &bitbucketAPIError{status: resp.StatusCode, body: strings.TrimSpace(string(body))}
 	}
 	if result == nil || resp.StatusCode == http.StatusNoContent {
-		return nil
+		return resp.StatusCode, nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-		return fmt.Errorf("decode bitbucket response: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil && err != io.EOF {
+		return resp.StatusCode, fmt.Errorf("decode bitbucket response: %w", err)
 	}
-	return nil
+	return resp.StatusCode, nil
+}
+
+// bitbucketRepoEndpoint returns the path-escaped API path of the repository.
+func bitbucketRepoEndpoint(nfo *Info) string {
+	return "repositories/" + url.PathEscape(nfo.Owner) + "/" + url.PathEscape(nfo.Repo)
+}
+
+// bitbucketPREndpoint returns the path-escaped API path of a pull request.
+func bitbucketPREndpoint(nfo *Info, number int) string {
+	return bitbucketRepoEndpoint(nfo) + "/pullrequests/" + strconv.Itoa(number)
+}
+
+// bitbucketBranchEndpoint returns the API path of a branch. Slashes in the
+// branch name are kept as path separators, as in Bitbucket's own links.
+func bitbucketBranchEndpoint(nfo *Info, name string) string {
+	segs := strings.Split(name, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return bitbucketRepoEndpoint(nfo) + "/refs/branches/" + strings.Join(segs, "/")
 }

@@ -163,7 +163,7 @@ func branchListRemoteBitbucket(ctx context.Context, nfo *Info, opts BranchListOp
 	if query != "" {
 		params.Set("q", query)
 	}
-	endpoint := "repositories/" + url.PathEscape(nfo.Owner) + "/" + url.PathEscape(nfo.Repo) + "/refs/branches"
+	endpoint := bitbucketRepoEndpoint(nfo) + "/refs/branches"
 	var out []BranchInfo
 	visit := func(b bitbucketBranchListItem) bool {
 		info := BranchInfo{Name: b.Name, Author: b.Target.Author.User.DisplayName}

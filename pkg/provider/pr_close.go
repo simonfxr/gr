@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"time"
+	"net/http"
 
 	githublib "github.com/google/go-github/v74/github"
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -59,26 +57,13 @@ func prCloseGitLab(ctx context.Context, nfo *Info, number int) (*PRDetails, erro
 }
 
 func prCloseBitbucket(ctx context.Context, nfo *Info, number int) (*PRDetails, error) {
-	bb, err := bitbucketClient(nfo)
+	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return nil, err
 	}
-	po := &bitbucket.PullRequestsOptions{
-		Owner:    nfo.Owner,
-		RepoSlug: nfo.Repo,
-		ID:       fmt.Sprintf("%d", number),
-	}
-	_, err = bb.Repositories.PullRequests.Decline(po)
-	if err != nil {
+	var pr bitbucketPR
+	if _, err := bb.call(ctx, http.MethodPost, bitbucketPREndpoint(nfo, number)+"/decline", nil, &pr); err != nil {
 		return nil, err
 	}
-	d, err := prViewBitbucket(ctx, nfo, number)
-	if err == nil {
-		if !strings.EqualFold(d.State, "declined") {
-			d.State = "declined"
-			d.UpdatedAt = time.Now()
-		}
-		return d, nil
-	}
-	return &PRDetails{Number: number, State: "declined"}, nil
+	return pr.toPRDetails(), nil
 }

@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
-	"time"
 
 	githublib "github.com/google/go-github/v74/github"
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -89,32 +88,19 @@ func prMergeGitLab(ctx context.Context, nfo *Info, number int, opts MergeOptions
 }
 
 func prMergeBitbucket(ctx context.Context, nfo *Info, number int, opts MergeOptions) (*PRDetails, error) {
-	bb, err := bitbucketClient(nfo)
+	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return nil, err
 	}
-	// Perform merge
-	po := &bitbucket.PullRequestsOptions{
-		Owner:             nfo.Owner,
-		RepoSlug:          nfo.Repo,
-		ID:                fmt.Sprintf("%d", number),
-		CloseSourceBranch: opts.DeleteBranch,
-	}
-	_, err = bb.Repositories.PullRequests.Merge(po)
+	payload := map[string]any{"close_source_branch": opts.DeleteBranch}
+	var pr bitbucketPR
+	status, err := bb.call(ctx, http.MethodPost, bitbucketPREndpoint(nfo, number)+"/merge", payload, &pr)
 	if err != nil {
 		return nil, err
 	}
-	// Return updated view; Bitbucket library returns interface{} without strong type
-	d, err := prViewBitbucket(ctx, nfo, number)
-	if err == nil {
-		// On success, mark as merged if not yet reflected
-		if !d.Merged {
-			d.Merged = true
-			d.State = "merged"
-			d.UpdatedAt = time.Now()
-		}
-		return d, nil
+	if status == http.StatusAccepted || pr.ID == 0 {
+		// Queued or still merging in the background: report the current state.
+		return prViewBitbucket(ctx, nfo, number)
 	}
-	// Fallback minimal
-	return &PRDetails{Number: number, Merged: true, State: "merged"}, nil
+	return pr.toPRDetails(), nil
 }
