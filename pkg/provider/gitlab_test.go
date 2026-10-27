@@ -274,3 +274,79 @@ func TestGitLabPrListStates(t *testing.T) {
 		}
 	}
 }
+
+// fakeGitLabRename serves the requests of a branch rename old -> new. MR 3
+// targets old; sourceMRs are the MRs whose source branch is old.
+func fakeGitLabRename(t *testing.T, sourceMRs string, updateStatus int) (*fakeAPI, *Info) {
+	f, info := fakeGitLab(t)
+	const mrs = "GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests"
+	f.handle(mrs, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch {
+		case q.Get("state") != "opened":
+			t.Errorf("query = %v", q)
+		case q.Get("source_branch") == "old":
+			writeJSON(w, http.StatusOK, sourceMRs)
+		case q.Get("target_branch") == "old":
+			writeJSON(w, http.StatusOK, `[{"iid":3,"title":"T","description":"D","source_branch":"feature"}]`)
+		default:
+			t.Errorf("query = %v", q)
+		}
+	})
+	f.reply("POST /api/v4/projects/group%2Fsub%2Fproj/repository/branches", http.StatusCreated, `{"name":"new"}`)
+	f.handle("PUT /api/v4/projects/group%2Fsub%2Fproj/merge_requests/3", func(w http.ResponseWriter, r *http.Request) {
+		got := decodeJSON(t, r)
+		if got["target_branch"] == "new" {
+			writeJSON(w, updateStatus, `{"iid":3}`)
+			return
+		}
+		// Fallback: the old MR is closed and points to its replacement.
+		if got["state_event"] != "close" || got["description"] != "D\n\nSuperseded by https://gl/mr/4" {
+			t.Errorf("close payload = %v", got)
+		}
+		writeJSON(w, http.StatusOK, `{"iid":3}`)
+	})
+	f.reply("DELETE /api/v4/projects/group%2Fsub%2Fproj/repository/branches/old", http.StatusNoContent, ``)
+	return f, info
+}
+
+func TestGitLabBranchRenameRetargetsMRs(t *testing.T) {
+	f, info := fakeGitLabRename(t, `[]`, http.StatusOK)
+	if err := ProviderGitLab.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if f.called("POST /api/v4/projects/group%2Fsub%2Fproj/merge_requests") {
+		t.Error("MR recreated although the update succeeded")
+	}
+	if !f.called("DELETE /api/v4/projects/group%2Fsub%2Fproj/repository/branches/old") {
+		t.Error("old branch not deleted")
+	}
+}
+
+func TestGitLabBranchRenameRecreatesMRAsFallback(t *testing.T) {
+	f, info := fakeGitLabRename(t, `[]`, http.StatusConflict)
+	f.handle("POST /api/v4/projects/group%2Fsub%2Fproj/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		got := decodeJSON(t, r)
+		if got["target_branch"] != "new" || got["source_branch"] != "feature" || got["title"] != "T" {
+			t.Errorf("recreate payload = %v", got)
+		}
+		writeJSON(w, http.StatusCreated, `{"iid":4,"web_url":"https://gl/mr/4"}`)
+	})
+	if err := ProviderGitLab.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGitLabBranchRenameSourceMRs(t *testing.T) {
+	f, info := fakeGitLabRename(t, `[{"iid":8,"source_branch":"old"}]`, http.StatusOK)
+	err := ProviderGitLab.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{})
+	if !isInvalidArg(err) || !strings.Contains(err.Error(), "!8") {
+		t.Fatalf("err = %v", err)
+	}
+	if f.called("POST /api/v4/projects/group%2Fsub%2Fproj/repository/branches") {
+		t.Error("branch created despite refusal")
+	}
+	if err := ProviderGitLab.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{Force: true}); err != nil {
+		t.Errorf("--force: %v", err)
+	}
+}

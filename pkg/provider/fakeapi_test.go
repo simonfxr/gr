@@ -39,7 +39,7 @@ func newFakeAPI(t *testing.T, auth func(*http.Request) bool) *fakeAPI {
 	})
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.calls = append(f.calls, r.Method+" "+r.URL.Path)
+		f.calls = append(f.calls, r.Method+" "+r.URL.EscapedPath())
 		f.mu.Unlock()
 		if f.auth != nil && !f.auth(r) {
 			t.Errorf("%s %s: missing or wrong credentials", r.Method, r.URL)
@@ -60,7 +60,7 @@ func (f *fakeAPI) reply(pattern string, status int, body string) {
 	f.handle(pattern, func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, status, body) })
 }
 
-// called reports whether a request "METHOD /path" was received.
+// called reports whether a request "METHOD /escaped/path" was received.
 func (f *fakeAPI) called(call string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()

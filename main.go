@@ -173,7 +173,7 @@ type BranchRenameCmd struct {
 	New         string `arg:"positional,required" help:"new branch name"`
 	LocalOnly   bool   `arg:"--local-only" help:"rename only locally, do not touch remote"`
 	NoUpdatePRs bool   `arg:"--no-update-prs" help:"do not retarget open PRs/MRs to new branch name"`
-	Force       bool   `arg:"--force" help:"proceed even if open MRs use the source branch (GitLab). Equivalent to --no-update-prs; may orphan MR source branches."`
+	Force       bool   `arg:"--force" help:"rename even if open GitLab MRs use the branch as source; GitLab cannot update them, so they lose their source branch"`
 }
 
 type BranchDeleteCmd struct {

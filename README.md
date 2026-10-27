@@ -60,6 +60,15 @@ rebase: its project setting decides between merge commits and fast-forward.
 `gr pr create` are set to delete their branch). A merge that Bitbucket queues
 is reported as not merged yet.
 
+### Renaming branches
+
+`gr branch rename OLD NEW` renames the remote branch (`--local-only`: only the
+local one) and retargets open PRs, unless `--no-update-prs` is given. GitHub
+does this itself; on Bitbucket gr updates the source and target branch of open
+PRs. On GitLab, MRs targeting the branch get the new target branch (recreated
+only if GitLab rejects the change), but an MR's source branch cannot be
+changed: if open MRs come from the branch, gr refuses unless `--force`.
+
 ### Text input
 
 `addcomment`, `reply` and `addtask` take their text as an argument or via

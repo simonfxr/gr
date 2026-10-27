@@ -42,9 +42,7 @@ func branchRename(ctx context.Context, cmd *BranchRenameCmd) error {
 	if err != nil {
 		return err
 	}
-	// --force is an alias for skipping MR updates/safety checks on providers
-	// where updating MR source branch is not supported (e.g., GitLab).
-	opts := provider.BranchRenameOptions{NoUpdatePRs: cmd.NoUpdatePRs || cmd.Force}
+	opts := provider.BranchRenameOptions{NoUpdatePRs: cmd.NoUpdatePRs, Force: cmd.Force}
 	if err := info.Provider.BranchRename(ctx, info, cmd.Old, cmd.New, opts); err != nil {
 		return err
 	}
