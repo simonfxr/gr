@@ -99,33 +99,161 @@ func prView(ctx context.Context, info *provider.Info, cmd *PRViewCmd) error {
 	if err != nil {
 		return err
 	}
-	d, err := info.Provider.PrView(ctx, info, number)
+	st, err := info.Provider.PrStatus(ctx, info, number)
 	if err != nil {
 		return err
 	}
 	if cmd.JSON {
-		return printJSON(d)
+		return printJSON(st)
 	}
-	fmt.Printf("%s (#%d)\n", d.Title, d.Number)
-	fmt.Printf("Author:   %s\n", d.Author)
-	fmt.Printf("State:    %s\n", formatState(d.State, d.ProviderState, d.Draft))
-	if d.Head != "" || d.Base != "" {
-		fmt.Printf("Branch:   %s -> %s\n", d.Head, d.Base)
+	for _, w := range st.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: could not fetch %s\n", w)
 	}
-	if s := formatTime(d.CreatedAt); s != "" {
-		fmt.Printf("Created:  %s\n", s)
-	}
-	if s := formatTime(d.UpdatedAt); s != "" {
-		fmt.Printf("Updated:  %s\n", s)
-	}
-	if d.URL != "" {
-		fmt.Printf("URL:      %s\n", d.URL)
-	}
-	if strings.TrimSpace(d.Body) != "" {
-		fmt.Println()
-		fmt.Println(d.Body)
-	}
+	printPRStatus(st)
 	return nil
+}
+
+func printPRStatus(st *provider.PRStatus) {
+	field := func(name, format string, args ...any) {
+		fmt.Printf("%-11s%s\n", name+":", fmt.Sprintf(format, args...))
+	}
+	fmt.Printf("%s (#%d)\n", st.Title, st.Number)
+	field("Author", "%s", st.Author)
+	field("State", "%s", formatState(st.State, st.ProviderState, st.Draft))
+	if st.Head != "" || st.Base != "" {
+		field("Branch", "%s -> %s", st.Head, st.Base)
+	}
+	if s := formatTime(st.CreatedAt); s != "" {
+		field("Created", "%s", s)
+	}
+	if s := formatTime(st.UpdatedAt); s != "" {
+		field("Updated", "%s", s)
+	}
+	if st.URL != "" {
+		field("URL", "%s", st.URL)
+	}
+	if r := st.Reviews; r != nil && (len(r.Reviewers) > 0 || r.Decision != "") {
+		field("Reviews", "%s", formatReviews(r))
+		if len(r.Reviewers) > 0 {
+			field("Reviewers", "%s", formatReviewers(r.Reviewers))
+		}
+	}
+	if c := st.Checks; c != nil {
+		field("Checks", "%s", formatChecks(c))
+	}
+	if c := st.Comments; c != nil {
+		s := strconv.Itoa(c.Total)
+		if c.Unresolved > 0 {
+			s += fmt.Sprintf(", %d unresolved", c.Unresolved)
+		}
+		field("Comments", "%s", s)
+	}
+	if t := st.Tasks; t != nil {
+		field("Tasks", "%d open, %d resolved", t.Open, t.Resolved)
+	}
+	if st.State == provider.StateOpen {
+		field("Merge", "%s", formatMerge(st))
+	}
+	if strings.TrimSpace(st.Body) != "" {
+		fmt.Println()
+		fmt.Println(st.Body)
+	}
+}
+
+// formatReviews renders the review decision and approvals, e.g.
+// "review required, 1 of 2 approvals".
+func formatReviews(r *provider.Reviews) string {
+	var parts []string
+	if r.Decision != "" {
+		parts = append(parts, strings.ReplaceAll(r.Decision, "_", " "))
+	}
+	if r.ApprovalsRequired > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d approvals", r.Approvals, r.ApprovalsRequired))
+	} else {
+		parts = append(parts, plural(r.Approvals, "approval"))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// formatReviewers renders reviewers with their state, e.g.
+// "bob (approved), carol (changes requested)".
+func formatReviewers(reviewers []provider.Reviewer) string {
+	var parts []string
+	for _, r := range reviewers {
+		state := strings.ReplaceAll(r.State, "_", " ")
+		if r.Requested && r.State == provider.ReviewPending {
+			state = "requested"
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s)", r.Login, state))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// formatChecks summarizes checks, naming failed ones, e.g.
+// "1 failed (lint), 3 passed".
+func formatChecks(r *provider.ChecksReport) string {
+	if len(r.Checks) == 0 {
+		return "none reported"
+	}
+	var failed []string
+	for _, c := range r.Checks {
+		if (c.State == provider.CheckFail || c.State == provider.CheckCancelled) && !c.Optional {
+			failed = append(failed, checkName(c))
+		}
+	}
+	s := checksSummary(r)
+	if len(failed) > 0 {
+		s += " (failed: " + strings.Join(failed, ", ") + ")"
+	}
+	return s
+}
+
+// blockerText describes merge blockers.
+var blockerText = map[string]string{
+	provider.BlockerDraft:            "draft",
+	provider.BlockerConflicts:        "merge conflicts",
+	provider.BlockerBehind:           "behind the base branch",
+	provider.BlockerChecksFailed:     "checks failed",
+	provider.BlockerChecksPending:    "checks pending",
+	provider.BlockerChangesRequested: "changes requested",
+	provider.BlockerApprovalRequired: "approval required",
+	provider.BlockerNotOpen:          "not open",
+}
+
+// formatMerge renders the merge verdict and blockers, e.g.
+// "blocked: checks failed, 2 unresolved comments".
+func formatMerge(st *provider.PRStatus) string {
+	m := st.Merge
+	var blockers []string
+	for _, b := range m.Blockers {
+		switch b {
+		case provider.BlockerUnresolvedComments:
+			if st.Comments != nil {
+				b = plural(st.Comments.Unresolved, "unresolved comment")
+			} else {
+				b = "unresolved comments"
+			}
+		case provider.BlockerOpenTasks:
+			b = plural(st.Tasks.Open, "open task")
+		case provider.BlockerBlocked:
+			b = "blocked by repository rules (" + m.ProviderStatus + ")"
+		default:
+			b = blockerText[b]
+		}
+		blockers = append(blockers, b)
+	}
+	switch {
+	case len(blockers) == 0 && m.Mergeable != nil && *m.Mergeable:
+		return "ready"
+	case len(blockers) == 0 && m.Mergeable == nil:
+		return "no known blockers"
+	case len(blockers) == 0:
+		return "blocked (" + m.ProviderStatus + ")"
+	case m.Mergeable != nil && *m.Mergeable:
+		return "mergeable, but: " + strings.Join(blockers, ", ")
+	default:
+		return "blocked: " + strings.Join(blockers, ", ")
+	}
 }
 
 func prBrowse(ctx context.Context, info *provider.Info, cmd *PRBrowseCmd) error {
@@ -448,6 +576,14 @@ func editPRMessage(msgPath, title, body string) (string, string, error) {
 		return "", "", usageErrorf("aborted: empty PR title")
 	}
 	return title, body, nil
+}
+
+// plural renders a count, e.g. "1 approval" or "2 approvals".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // parseFileLine parses "file:line" into path and line number.

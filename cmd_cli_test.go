@@ -562,3 +562,46 @@ func TestCLIChecks(t *testing.T) {
 		}
 	}
 }
+
+// TestCLIView checks the review, check and merge summary of pr view.
+func TestCLIView(t *testing.T) {
+	repo := newTestRepo(t, "git@bitbucket.org:workspace/repo.git")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch strings.TrimPrefix(r.URL.Path, "/repositories/workspace/repo/pullrequests/7") {
+		case "":
+			io.WriteString(w, `{"id":7,"title":"Add z","state":"OPEN","author":{"nickname":"carol"},
+				"source":{"branch":{"name":"feature/x"},"commit":{"hash":"abc"}},"destination":{"branch":{"name":"main"}},
+				"participants":[{"user":{"nickname":"bob"},"role":"REVIEWER","approved":true},
+					{"user":{"nickname":"dave"},"role":"REVIEWER","state":"changes_requested"},
+					{"user":{"nickname":"erin"},"role":"REVIEWER"}]}`)
+		case "/statuses":
+			io.WriteString(w, `{"values":[{"key":"b","name":"build","state":"FAILED","links":{"commit":{"href":"x/commit/abcdef"}}},
+				{"key":"l","name":"lint","state":"SUCCESSFUL","links":{"commit":{"href":"x/commit/abcdef"}}}]}`)
+		case "/comments":
+			io.WriteString(w, `{"values":[{"id":1,"content":{"raw":"open"}}]}`)
+		case "/tasks":
+			http.Error(w, `{"error":{"message":"boom"}}`, http.StatusInternalServerError)
+		default:
+			http.Error(w, `{"error":{"message":"not found"}}`, http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	stdout, stderr, code := runGR(t, repo, server.URL, "pr view 7")
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	for _, want := range []string{
+		"Reviews:   changes requested, 1 approval\n",
+		"Reviewers: bob (approved), dave (changes requested), erin (requested)\n",
+		"Checks:    1 failed, 1 passed (failed: build)\n",
+		"Comments:  1, 1 unresolved\n",
+		"Merge:     blocked: checks failed, changes requested, 1 unresolved comment\n",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "Tasks:") || !strings.HasPrefix(stderr, "warning: could not fetch tasks: ") {
+		t.Errorf("failed tasks request: stdout:\n%s\nstderr: %s", stdout, stderr)
+	}
+}

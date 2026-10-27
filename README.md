@@ -13,7 +13,7 @@ go install github.com/simonfxr/gr@latest
 ```bash
 gr pr list              # List pull requests
 gr pr create            # Create a pull request
-gr pr view [PR]         # View PR details
+gr pr view [PR]         # PR details, reviews, checks, merge blockers
 gr pr checks [PR]       # CI checks (--watch to wait for them)
 gr pr merge [PR]        # Merge a PR
 gr pr close [PR]        # Close a PR
@@ -64,6 +64,47 @@ counts as deleted. On GitHub, `--keep-branch` cannot stop the repository's
 "Automatically delete head branches" setting. A merge that Bitbucket queues
 is reported as not merged yet. `gr pr close --delete-branch` deletes the
 source branch the same way.
+
+### Viewing a PR
+
+```
+$ gr pr view 7
+Add z (#7)
+Author:    carol
+State:     open
+Branch:    feature/x -> main
+...
+Reviews:   changes requested, 1 approval
+Reviewers: bob (approved), dave (changes requested), erin (requested)
+Checks:    1 failed, 3 passed (failed: build)
+Comments:  12, 2 unresolved
+Tasks:     1 open, 3 resolved
+Merge:     blocked: checks failed, changes requested, 2 unresolved comments, 1 open task
+```
+
+Besides the PR itself (`head_sha` is the head commit, abbreviated on
+Bitbucket), `pr view --json` reports:
+
+- `reviews`: `decision` (`approved`, `changes_requested`, `review_required`
+  or empty), `approvals`, `approvals_required` (GitLab approval rules) and
+  `reviewers` with `login`, `state` (`approved`, `changes_requested`,
+  `commented`, `pending`) and whether a review was `requested`. GitHub and
+  GitLab report the decision themselves; otherwise it follows from the
+  reviewers. On GitLab, users who approved without being reviewers are listed
+  too; on Bitbucket, everyone who commented.
+- `checks`: the report of `gr pr checks`.
+- `comments`: `total` and `unresolved` threads, as in `pr comments`/`pr todo`;
+  `tasks` (Bitbucket): `open` and `resolved`.
+- `merge`: `mergeable` is the provider's verdict (GitHub `mergeable_state`,
+  GitLab `detailed_merge_status`, kept in `provider_status`); it is `null`
+  while the provider is still checking, and on Bitbucket, which does not
+  report one. `blockers` lists what stands between the PR and merging,
+  enforced by the provider or not: `not_open`, `draft`, `conflicts`, `behind`,
+  `checks_failed`, `checks_pending`, `changes_requested`, `approval_required`,
+  `unresolved_comments`, `open_tasks`, and `blocked` for other provider rules.
+
+Parts that cannot be fetched (e.g. the token may not read CI statuses) are
+`null` and explained in `warnings`; in text mode the warnings go to stderr.
 
 ### CI checks
 

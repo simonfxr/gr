@@ -21,6 +21,14 @@ type bitbucketPR struct {
 	Reviewers         []struct {
 		UUID string `json:"uuid"`
 	} `json:"reviewers"`
+	// Participants are reviewers and users who commented or approved; only
+	// included when fetching a single PR.
+	Participants []struct {
+		User     *bitbucketUser `json:"user"`
+		Role     string         `json:"role"` // PARTICIPANT or REVIEWER
+		Approved bool           `json:"approved"`
+		State    string         `json:"state"` // approved, changes_requested or null
+	} `json:"participants"`
 	CreatedOn   string         `json:"created_on"`
 	UpdatedOn   string         `json:"updated_on"`
 	Source      bitbucketPRRef `json:"source"`
@@ -57,6 +65,7 @@ func (pr *bitbucketPR) toPRDetails() *PRDetails {
 		Draft:         pr.Draft,
 		Base:          pr.Destination.Branch.Name,
 		Head:          pr.Source.Branch.Name,
+		HeadSHA:       pr.Source.Commit.Hash,
 		URL:           pr.Links.HTML.Href,
 	}
 	d.CreatedAt, _ = time.Parse(time.RFC3339, pr.CreatedOn)

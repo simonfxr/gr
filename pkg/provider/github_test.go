@@ -26,7 +26,7 @@ func TestGitHubPrView(t *testing.T) {
 		Number: 7, Title: "Add x", Body: "desc", Author: "alice", State: "open", ProviderState: "open",
 		CreatedAt: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC),
-		Draft:     true, Base: "main", Head: "feature/x",
+		Draft:     true, Base: "main", Head: "feature/x", HeadSHA: "abc",
 		URL: "https://github.example/owner/repo/pull/7",
 	}
 	if !reflect.DeepEqual(got, want) {

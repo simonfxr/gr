@@ -34,7 +34,9 @@ type PRDetails struct {
 	Draft         bool      `json:"draft"`
 	Base          string    `json:"base"`
 	Head          string    `json:"head"`
-	URL           string    `json:"url"`
+	// HeadSHA is the head commit (abbreviated on Bitbucket).
+	HeadSHA string `json:"head_sha,omitempty"`
+	URL     string `json:"url"`
 }
 
 // PrView retrieves details for a single pull/merge request.
@@ -93,6 +95,7 @@ func githubPRDetails(pr *githublib.PullRequest) *PRDetails {
 		Draft:         pr.GetDraft(),
 		Base:          pr.GetBase().GetRef(),
 		Head:          pr.GetHead().GetRef(),
+		HeadSHA:       pr.GetHead().GetSHA(),
 		URL:           pr.GetHTMLURL(),
 	}
 }
@@ -109,6 +112,7 @@ func gitlabPRDetails(mr *gitlab.BasicMergeRequest) *PRDetails {
 		Draft:         mr.Draft,
 		Base:          mr.TargetBranch,
 		Head:          mr.SourceBranch,
+		HeadSHA:       mr.SHA,
 		URL:           mr.WebURL,
 	}
 	if mr.Author != nil {
