@@ -23,11 +23,7 @@ import (
 
 // githubClient returns a GitHub client using token from config/env.
 func githubClient(ctx context.Context, nfo *Info) (*githublib.Client, error) {
-	var cfg *config.ProviderConfig
-	if nfo != nil && nfo.Config != nil {
-		cfg = &nfo.Config.GitHub
-	}
-	token, err := auth.GetToken(cfg, "GITHUB_TOKEN")
+	token, err := resolveToken(nfo, func(c *config.Config) *config.ProviderConfig { return &c.GitHub }, "GITHUB_TOKEN")
 	if err != nil {
 		return nil, fmt.Errorf("github token: %w", err)
 	}
@@ -37,9 +33,12 @@ func githubClient(ctx context.Context, nfo *Info) (*githublib.Client, error) {
 		return nil, missingToken("github", "GITHUB_TOKEN", "github")
 	}
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))
-
-	if nfo != nil && nfo.Provider == ProviderGitHub && nfo.Variant == "self-hosted" && nfo.HTTPBase != "" {
-		base := strings.TrimRight(nfo.HTTPBase, "/") + "/api/v3/"
+	if nfo != nil && (nfo.APIBase != "" || nfo.Variant == "self-hosted") {
+		base, err := apiBase(nfo, "/api/v3")
+		if err != nil {
+			return nil, err
+		}
+		base += "/"
 		return githublib.NewEnterpriseClient(base, base, httpClient)
 	}
 	return githublib.NewClient(httpClient), nil
@@ -48,11 +47,7 @@ func githubClient(ctx context.Context, nfo *Info) (*githublib.Client, error) {
 // gitlabClient returns an authenticated GitLab client using token from
 // config/env. All its requests use ctx.
 func gitlabClient(ctx context.Context, nfo *Info) (*gitlab.Client, error) {
-	var cfg *config.ProviderConfig
-	if nfo != nil && nfo.Config != nil {
-		cfg = &nfo.Config.GitLab
-	}
-	token, err := auth.GetToken(cfg, "GITLAB_TOKEN")
+	token, err := resolveToken(nfo, func(c *config.Config) *config.ProviderConfig { return &c.GitLab }, "GITLAB_TOKEN")
 	if err != nil {
 		return nil, fmt.Errorf("gitlab token: %w", err)
 	}
@@ -60,8 +55,12 @@ func gitlabClient(ctx context.Context, nfo *Info) (*gitlab.Client, error) {
 		return nil, missingToken("gitlab", "GITLAB_TOKEN", "gitlab")
 	}
 	opts := []gitlab.ClientOptionFunc{gitlab.WithRequestOptions(gitlab.WithContext(ctx))}
-	if nfo != nil && nfo.Provider == ProviderGitLab && nfo.Variant == "self-hosted" && nfo.HTTPBase != "" {
-		opts = append(opts, gitlab.WithBaseURL(strings.TrimRight(nfo.HTTPBase, "/")+"/api/v4"))
+	if nfo != nil && (nfo.APIBase != "" || nfo.Variant == "self-hosted") {
+		base, err := apiBase(nfo, "/api/v4")
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, gitlab.WithBaseURL(base))
 	}
 	return gitlab.NewClient(token, opts...)
 }
@@ -69,21 +68,67 @@ func gitlabClient(ctx context.Context, nfo *Info) (*gitlab.Client, error) {
 // bitbucketCredentials returns the Bitbucket Cloud username (may be empty) and token.
 func bitbucketCredentials(nfo *Info) (string, string, error) {
 	if nfo != nil && nfo.Provider == ProviderBitbucket && nfo.Variant == "self-hosted" {
-		return "", "", errors.New("bitbucket server is not supported yet")
+		return "", "", fmt.Errorf("bitbucket server is not supported yet (if %s is an SSH alias of bitbucket.org, set web_url = \"https://bitbucket.org\" under [hosts.%q])", nfo.Host, nfo.Host)
 	}
-	var cfg *config.ProviderConfig
-	if nfo != nil && nfo.Config != nil {
-		cfg = &nfo.Config.Bitbucket
-	}
-	token, err := auth.GetToken(cfg, "BITBUCKET_TOKEN")
+	section := func(c *config.Config) *config.ProviderConfig { return &c.Bitbucket }
+	token, err := resolveToken(nfo, section, "BITBUCKET_TOKEN")
 	if err != nil {
 		return "", "", fmt.Errorf("bitbucket token: %w", err)
 	}
-	user := auth.GetUsername(cfg, "BITBUCKET_USERNAME")
-	if token != "" {
-		return user, token, nil
+	if token == "" {
+		return "", "", missingToken("bitbucket", "BITBUCKET_TOKEN", "bitbucket")
 	}
-	return "", "", missingToken("bitbucket", "BITBUCKET_TOKEN", "bitbucket")
+	var user string
+	if hc := hostCredentials(nfo); hc != nil {
+		user = auth.GetUsername(hc, "")
+	}
+	if user == "" {
+		user = auth.GetUsername(providerSection(nfo, section), "BITBUCKET_USERNAME")
+	}
+	return user, token, nil
+}
+
+// resolveToken returns the token for nfo's host: its [hosts] credentials,
+// else the env variable, else the provider section of the config.
+func resolveToken(nfo *Info, section func(*config.Config) *config.ProviderConfig, env string) (string, error) {
+	if hc := hostCredentials(nfo); hc != nil {
+		if token, err := auth.GetToken(hc, ""); err != nil || token != "" {
+			return token, err
+		}
+	}
+	return auth.GetToken(providerSection(nfo, section), env)
+}
+
+func hostCredentials(nfo *Info) *config.ProviderConfig {
+	if nfo == nil || nfo.HostConfig == nil {
+		return nil
+	}
+	return &nfo.HostConfig.ProviderConfig
+}
+
+func providerSection(nfo *Info, section func(*config.Config) *config.ProviderConfig) *config.ProviderConfig {
+	if nfo == nil || nfo.Config == nil {
+		return nil
+	}
+	return section(nfo.Config)
+}
+
+// apiBase returns the API root of a self-hosted instance: the configured
+// api_url, or path below the web root. A plain-http root that was only
+// found by probing is refused, as the token would be sent in cleartext;
+// configuring the host explicitly opts in.
+func apiBase(nfo *Info, path string) (string, error) {
+	if nfo.APIBase != "" {
+		return nfo.APIBase, nil
+	}
+	base := strings.TrimRight(nfo.HTTPBase, "/")
+	if base == "" {
+		return "", fmt.Errorf("no API URL known for %s; set api_url under [hosts.%q]", nfo.Host, nfo.Host)
+	}
+	if strings.HasPrefix(base, "http://") && nfo.Evidence != "config" {
+		return "", fmt.Errorf("%s answered only over plain HTTP; refusing to send credentials unencrypted (to allow it, set web_url = %q under [hosts.%q])", nfo.Host, base, nfo.Host)
+	}
+	return base + path, nil
 }
 
 // CurrentBranch returns the current branch name of the repository detected from Info.

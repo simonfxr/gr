@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,7 +18,8 @@ import (
 // bitbucketAPIClient talks to the Bitbucket Cloud REST API directly.
 // Listings use explicit pagination: the SDK eagerly collects every page and
 // cannot express all the query/partial-response parameters these endpoints use.
-// BITBUCKET_API_BASE_URL overrides the API root (used by tests).
+// BITBUCKET_API_BASE_URL (used by tests) or a configured api_url overrides
+// the API root.
 type bitbucketAPIClient struct {
 	baseURL *url.URL
 	http    *http.Client
@@ -30,10 +32,7 @@ func newBitbucketAPIClient(nfo *Info) (*bitbucketAPIClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	base := os.Getenv("BITBUCKET_API_BASE_URL")
-	if base == "" {
-		base = "https://api.bitbucket.org/2.0"
-	}
+	base := cmp.Or(os.Getenv("BITBUCKET_API_BASE_URL"), nfo.APIBase, "https://api.bitbucket.org/2.0")
 	u, err := url.Parse(strings.TrimRight(base, "/") + "/")
 	if err != nil {
 		return nil, fmt.Errorf("bitbucket API URL: %w", err)

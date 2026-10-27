@@ -34,8 +34,12 @@ type Info struct {
 
 	Provider Provider // enum: github|gitlab|bitbucket|unknown
 	Variant  string   // cloud|self-hosted|unknown
-	Evidence string   // method used (e.g. api_v4_version, headers, url-heuristic)
-	HTTPBase string   // http(s) base used for probing, if any
+	Evidence string   // method used (e.g. config, api_v4_version, headers, url-heuristic)
+	HTTPBase string   // web root (configured, or the http(s) base used for probing), if any
+	APIBase  string   // configured API root (api_url), if any
+
+	// HostConfig is the [hosts] entry of Host, if any.
+	HostConfig *config.HostConfig
 
 	Host   string // e.g. github.com
 	Owner  string // e.g. user or project
@@ -80,22 +84,104 @@ func DetectFromRepo(localRepo *LocalRepo, cfg *config.Config) (*Info, error) {
 	raw := remoteCfg.URLs[0]
 
 	host, port, owner, repoName := parseRemoteURL(raw)
-
-	svc, variant, evidence, base := detectService(host, port)
-
-	return &Info{
+	info := &Info{
 		LocalRepo: *localRepo,
-		Provider:  svc,
-		Variant:   variant,
-		Evidence:  evidence,
-		HTTPBase:  base,
 		Host:      hostOnly(host),
 		Owner:     owner,
 		Repo:      repoName,
 		Remote:    remoteCfg.Name,
 		URL:       raw,
 		Config:    cfg,
-	}, nil
+	}
+	if hc, ok := cfg.Host(info.Host); ok {
+		info.HostConfig = hc
+		if hc.Provider != "" {
+			return info, info.applyHostConfig()
+		}
+	}
+	if isSSHRemote(raw) {
+		// The port of an SSH remote is the SSH daemon's, not the web server's.
+		port = 0
+	}
+	info.Provider, info.Variant, info.Evidence, info.HTTPBase = detectService(host, port)
+	return info, nil
+}
+
+// isSSHRemote reports whether a remote URL uses SSH (ssh:// or scp-like).
+func isSSHRemote(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	return strings.HasPrefix(raw, "ssh://") || strings.HasPrefix(raw, "git+ssh://") || !strings.Contains(raw, "://")
+}
+
+// cloudHosts maps the web hosts of the cloud services to their provider.
+var cloudHosts = map[string]Provider{
+	"github.com":        ProviderGitHub,
+	"gitlab.com":        ProviderGitLab,
+	"bitbucket.org":     ProviderBitbucket,
+	"ssh.bitbucket.org": ProviderBitbucket,
+}
+
+// ParseProvider parses a provider name as used in the configuration.
+func ParseProvider(name string) (Provider, bool) {
+	for _, p := range []Provider{ProviderGitHub, ProviderGitLab, ProviderBitbucket} {
+		if strings.EqualFold(strings.TrimSpace(name), p.String()) {
+			return p, true
+		}
+	}
+	return ProviderUnknown, false
+}
+
+// applyHostConfig sets the provider and URLs from the host's [hosts] entry,
+// without any network probing.
+func (nfo *Info) applyHostConfig() error {
+	hc := nfo.HostConfig
+	section := fmt.Sprintf("[hosts.%q]", nfo.Host)
+	p, ok := ParseProvider(hc.Provider)
+	if !ok {
+		return fmt.Errorf("%s: unknown provider %q (want github, gitlab or bitbucket)", section, hc.Provider)
+	}
+	nfo.Provider, nfo.Evidence = p, "config"
+	web := strings.TrimRight(hc.WebURL, "/")
+	if web == "" && hc.APIURL != "" && p != ProviderBitbucket {
+		// GitHub Enterprise and GitLab serve their API below the web root.
+		web = strings.TrimSuffix(strings.TrimSuffix(strings.TrimRight(hc.APIURL, "/"), "/api/v3"), "/api/v4")
+	}
+	if web == "" {
+		web = "https://" + nfo.Host
+	}
+	webURL, err := parseHTTPURL(web)
+	if err != nil {
+		return fmt.Errorf("%s: web_url: %w", section, err)
+	}
+	if hc.APIURL != "" {
+		if _, err := parseHTTPURL(hc.APIURL); err != nil {
+			return fmt.Errorf("%s: api_url: %w", section, err)
+		}
+	}
+	nfo.HTTPBase, nfo.APIBase = web, strings.TrimRight(hc.APIURL, "/")
+	nfo.Variant = "self-hosted"
+	if cloudHosts[strings.ToLower(webURL.Hostname())] == p {
+		nfo.Variant = "cloud" // e.g. an SSH alias of github.com
+	}
+	// An instance below a path prefix (example.com/gitlab) has it in http(s)
+	// remote URLs too; it is not part of the owner.
+	if prefix := strings.Trim(webURL.Path, "/"); prefix != "" && !isSSHRemote(nfo.URL) {
+		if rest, ok := strings.CutPrefix(nfo.Owner+"/", prefix+"/"); ok {
+			nfo.Owner = strings.TrimSuffix(rest, "/")
+		}
+	}
+	return nil
+}
+
+func parseHTTPURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return nil, fmt.Errorf("%q is not an http(s) URL", raw)
+	}
+	return u, nil
 }
 
 func findDotGit(path string) (dot string, fi os.FileInfo, err error) {
@@ -321,14 +407,8 @@ func detectService(host string, port int) (service Provider, variant, evidence, 
 		return ProviderUnknown, "unknown", "none", ""
 	}
 
-	// Known cloud hosts
-	switch strings.ToLower(host) {
-	case "github.com":
-		return ProviderGitHub, "cloud", "url-heuristic", ""
-	case "gitlab.com":
-		return ProviderGitLab, "cloud", "url-heuristic", ""
-	case "bitbucket.org", "ssh.bitbucket.org":
-		return ProviderBitbucket, "cloud", "url-heuristic", ""
+	if p, ok := cloudHosts[strings.ToLower(host)]; ok {
+		return p, "cloud", "url-heuristic", ""
 	}
 
 	hostsToTry := []string{}

@@ -64,6 +64,8 @@ func TestParsePRRef(t *testing.T) {
 		{"https://github.com/workspace/repo/pull/12/files", bitbucketInfo, 12},
 		{"https://gitlab.com/group/sub/proj/-/merge_requests/5", gitlab, 5},
 		{"https://gitlab.com/group/proj/-/merge_requests/5", gitlab, 0},
+		{"https://example.com/gitlab/group/sub/proj/-/merge_requests/5", gitlab, 5}, // path prefix
+		{"https://gitlab.com/sub/proj/-/merge_requests/5", gitlab, 0},
 	} {
 		got, err := parsePRRef(tc.ref, tc.info)
 		if tc.want == 0 {
@@ -333,21 +335,49 @@ func TestBuildTodo(t *testing.T) {
 	}
 }
 
-// TestCLIExitCodes runs the real main() against a temporary repository.
-func TestCLIExitCodes(t *testing.T) {
+// newTestRepo creates a git repository on branch feature/x with one commit
+// and the given origin remote.
+func newTestRepo(t *testing.T, remote string) string {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
 	repo := t.TempDir()
 	for _, args := range [][]string{
 		{"init", "-q", "-b", "feature/x"},
-		{"remote", "add", "origin", "git@bitbucket.org:workspace/repo.git"},
+		{"remote", "add", "origin", remote},
 		{"-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"},
 	} {
 		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
+	return repo
+}
+
+// runGR runs the real main() in repo with a fake Bitbucket API at apiURL.
+func runGR(t *testing.T, repo, apiURL, args string, env ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	cmd.Env = append(os.Environ(),
+		"GR_TEST_RUN_MAIN=1", "GR_TEST_ARGS=-C "+repo+" "+args,
+		"BITBUCKET_API_BASE_URL="+apiURL, "BITBUCKET_TOKEN=t", "BITBUCKET_USERNAME=",
+		"GR_CONFIG=", "HOME="+repo, "XDG_CONFIG_HOME="+repo)
+	cmd.Env = append(cmd.Env, env...)
+	var o, e bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &o, &e
+	err := cmd.Run()
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return o.String(), e.String(), code
+}
+
+// TestCLIExitCodes runs the real main() against a temporary repository.
+func TestCLIExitCodes(t *testing.T) {
+	repo := newTestRepo(t, "git@bitbucket.org:workspace/repo.git")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/repositories/workspace/repo/pullrequests":
@@ -360,24 +390,6 @@ func TestCLIExitCodes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	run := func(args string) (stdout, stderr string, code int) {
-		cmd := exec.Command(os.Args[0], "-test.run=^$")
-		cmd.Env = append(os.Environ(),
-			"GR_TEST_RUN_MAIN=1", "GR_TEST_ARGS=-C "+repo+" "+args,
-			"BITBUCKET_API_BASE_URL="+server.URL, "BITBUCKET_TOKEN=t", "BITBUCKET_USERNAME=",
-			"GR_CONFIG=", "HOME="+repo, "XDG_CONFIG_HOME="+repo)
-		var o, e bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &o, &e
-		err := cmd.Run()
-		code = 0
-		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
-			code = ee.ExitCode()
-		} else if err != nil {
-			t.Fatal(err)
-		}
-		return o.String(), e.String(), code
-	}
-
 	for _, tc := range []struct {
 		args     string
 		code     int
@@ -389,9 +401,10 @@ func TestCLIExitCodes(t *testing.T) {
 		{"pr view 1 -n 2", exitUsage, ""},                  // conflicting selection
 		{"pr addtask -n 1", exitUsage, ""},                 // missing body
 		{"pr tasks -n https://bitbucket.org/x/y/pull-requests/1", exitUsage, ""},
+		{"pr list --state bogus --json", exitUsage, "usage"},
 		{"pr", exitUsage, ""},
 	} {
-		stdout, stderr, code := run(tc.args)
+		stdout, stderr, code := runGR(t, repo, server.URL, tc.args)
 		if code != tc.code {
 			t.Errorf("gr %s: exit %d, want %d\nstdout: %s\nstderr: %s", tc.args, code, tc.code, stdout, stderr)
 			continue
@@ -405,5 +418,38 @@ func TestCLIExitCodes(t *testing.T) {
 				t.Errorf("gr %s: unexpected stdout %q", tc.args, stdout)
 			}
 		}
+	}
+}
+
+// TestCLIHostConfig selects the provider and token of an SSH host alias from
+// [hosts], without probing the network.
+func TestCLIHostConfig(t *testing.T) {
+	repo := newTestRepo(t, "git@bb-work:workspace/repo.git")
+	cfg := filepath.Join(repo, "gr.toml")
+	if err := os.WriteFile(cfg, []byte(`
+[hosts.bb-work]
+provider = "bitbucket"
+web_url = "https://bitbucket.org"
+token = "work-token"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer work-token" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		io.WriteString(w, `{"values":[{"id":3,"title":"T","state":"OPEN"}]}`)
+	}))
+	defer server.Close()
+	stdout, stderr, code := runGR(t, repo, server.URL, "pr list --json", "GR_CONFIG="+cfg)
+	if code != 0 || !strings.Contains(stdout, `"number": 3`) {
+		t.Errorf("exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+
+	// An unconfigured host that cannot be probed explains how to configure it.
+	repo = newTestRepo(t, "git@git.example.invalid:o/r.git")
+	_, stderr, code = runGR(t, repo, server.URL, "pr list")
+	if code != exitError || !strings.Contains(stderr, `[hosts."git.example.invalid"]`) {
+		t.Errorf("unknown host: exit %d, stderr: %s", code, stderr)
 	}
 }

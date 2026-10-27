@@ -177,13 +177,44 @@ token = "${BITBUCKET_TOKEN}"
 
 Note: Use only one of `token` or `credential_helper` per provider. If both are set, `token` takes precedence.
 
+### Per-host configuration
+
+`[hosts."NAME"]` configures a host by the name used in the git remote URL,
+which may also be an SSH alias from `~/.ssh/config`:
+
+```toml
+# Self-hosted GitLab below a path prefix, with its own token
+[hosts."git.example.com"]
+provider = "gitlab"                                   # github | gitlab | bitbucket
+api_url  = "https://git.example.com/gitlab/api/v4"    # optional
+token    = "${WORK_GITLAB_TOKEN}"
+
+# Second GitHub account via an SSH alias (Host gh-work in ~/.ssh/config)
+[hosts."gh-work"]
+provider = "github"
+web_url  = "https://github.com"
+credential_helper = "pass show github/work-token"
+```
+
+- `provider` skips network probing of self-hosted instances (which otherwise
+  happens on every command).
+- `web_url` defaults to `https://NAME`, or to `api_url` without its `/api/v4`
+  (GitLab) or `/api/v3` (GitHub Enterprise) suffix. `api_url` defaults to that
+  API path below `web_url`.
+- `token`, `credential_helper` and `username` work as in the provider sections
+  and take precedence over them and over the environment variables. A
+  `[hosts]` entry without `provider` only sets credentials.
+- gr refuses to send a token to an instance that probing found only via plain
+  `http://`; configure the host (e.g. `web_url = "http://..."`) to allow it.
+
 ### Token Resolution Order
 
 For each provider, tokens are resolved in this order:
 
-1. Environment variable (`GITHUB_TOKEN`, `GITLAB_TOKEN`, `BITBUCKET_TOKEN`)
-2. `token` field in config (with `${VAR}` expansion)
-3. `credential_helper` command output (cached for duration of command)
+1. `token` or `credential_helper` of the host's `[hosts]` entry
+2. Environment variable (`GITHUB_TOKEN`, `GITLAB_TOKEN`, `BITBUCKET_TOKEN`)
+3. `token` field in the provider section (with `${VAR}` expansion)
+4. `credential_helper` command output (cached for duration of command)
 
 ### Credential Helpers
 
@@ -218,11 +249,15 @@ needs a token, also for read-only commands on public repositories:
 
 ## Provider Detection
 
-gr automatically detects the provider from your git remote URL. It supports:
+gr detects the provider from the URL of the `origin` remote (else `upstream`,
+else the first remote). It supports:
 
 - GitHub (github.com and GitHub Enterprise)
 - GitLab (gitlab.com and self-hosted)
 - Bitbucket Cloud
+
+Other hosts are identified by probing their web server, unless they are
+configured under `[hosts]`.
 
 ## License
 

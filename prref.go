@@ -59,13 +59,28 @@ func parsePRRef(ref string, info *provider.Info) (int, error) {
 	if len(repoPath) < 2 {
 		return 0, usageErrorf("invalid pull request URL %q: no repository path", ref)
 	}
-	owner := strings.Join(repoPath[:len(repoPath)-1], "/")
-	repo := repoPath[len(repoPath)-1]
-	if info != nil && (!samePathComponent(owner, info.Owner) || !samePathComponent(repo, info.Repo)) {
-		return 0, usageErrorf("pull request URL %q belongs to %s/%s, but the current repository is %s/%s",
-			ref, owner, repo, info.Owner, info.Repo)
+	if info != nil && !sameRepoPath(repoPath, info) {
+		return 0, usageErrorf("pull request URL %q belongs to %s, but the current repository is %s/%s",
+			ref, strings.Join(repoPath, "/"), info.Owner, info.Repo)
 	}
 	return n, nil
+}
+
+// sameRepoPath reports whether the repository segments of a PR URL denote
+// the current repository. Leading extra segments are the path prefix of an
+// instance hosted below one (example.com/gitlab/group/repo).
+func sameRepoPath(segs []string, info *provider.Info) bool {
+	want := append(strings.Split(info.Owner, "/"), info.Repo)
+	if len(segs) < len(want) {
+		return false
+	}
+	segs = segs[len(segs)-len(want):]
+	for i := range want {
+		if !samePathComponent(segs[i], want[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // samePathComponent compares URL and remote path components. Bitbucket URLs

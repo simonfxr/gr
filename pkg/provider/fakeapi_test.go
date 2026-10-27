@@ -84,11 +84,14 @@ func decodeJSON(t *testing.T, r *http.Request) map[string]any {
 }
 
 // fakeGitHub serves a GitHub Enterprise style API (/api/v3) for owner/repo.
+// Like the GitLab fake, it is configured as a [hosts] entry with a plain
+// http web_url (Evidence "config"), which permits sending the token.
 func fakeGitHub(t *testing.T) (*fakeAPI, *Info) {
 	t.Helper()
 	t.Setenv("GITHUB_TOKEN", "gh-token")
 	f := newFakeAPI(t, func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer gh-token" })
-	return f, &Info{Provider: ProviderGitHub, Variant: "self-hosted", HTTPBase: f.srv.URL, Owner: "owner", Repo: "repo"}
+	return f, &Info{Provider: ProviderGitHub, Variant: "self-hosted", Evidence: "config",
+		HTTPBase: f.srv.URL, Owner: "owner", Repo: "repo"}
 }
 
 // fakeGitLab serves a self-hosted GitLab API (/api/v4) for the nested
@@ -97,7 +100,8 @@ func fakeGitLab(t *testing.T) (*fakeAPI, *Info) {
 	t.Helper()
 	t.Setenv("GITLAB_TOKEN", "gl-token")
 	f := newFakeAPI(t, func(r *http.Request) bool { return r.Header.Get("Private-Token") == "gl-token" })
-	return f, &Info{Provider: ProviderGitLab, Variant: "self-hosted", HTTPBase: f.srv.URL, Owner: "group/sub", Repo: "proj"}
+	return f, &Info{Provider: ProviderGitLab, Variant: "self-hosted", Evidence: "config",
+		HTTPBase: f.srv.URL, Owner: "group/sub", Repo: "proj"}
 }
 
 // fakeBitbucketAPI serves the Bitbucket Cloud API for workspace/repo.

@@ -251,6 +251,10 @@ var detectProvider = lazy(func() (*provider.Info, error) {
 	if err != nil {
 		return nil, fmt.Errorf("provider detection: %w", err)
 	}
+	if info.Provider == provider.ProviderUnknown {
+		return nil, fmt.Errorf("cannot tell which service hosts %s (remote %s: %s); configure it in ~/.config/gr/config.toml:\n"+
+			"  [hosts.%q]\n  provider = \"gitlab\"  # or \"github\", \"bitbucket\"", info.Host, info.Remote, info.URL, info.Host)
+	}
 	return info, nil
 })
 
