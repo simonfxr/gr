@@ -4,437 +4,356 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/simonfxr/gr/pkg/provider"
 	"github.com/simonfxr/gr/tables"
 )
 
-func runPR(cmd *PRCmd, info *provider.Info) {
+func runPR(cmd *PRCmd, info *provider.Info) error {
+	if info == nil {
+		return errors.New("cannot detect provider/repo info")
+	}
+	ctx := context.Background()
 	switch {
 	case cmd.List != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		opts := provider.ListOptions{
-			State:    cmd.List.State,
-			Author:   cmd.List.Author,
-			Assignee: cmd.List.Assignee,
-			Base:     cmd.List.Base,
-			Head:     cmd.List.Head,
-			Limit:    cmd.List.Limit,
-		}
-		rows, err := info.Provider.PrList(ctx, info, opts)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if cmd.List.JSON {
-			b, _ := json.MarshalIndent(rows, "", "  ")
-			fmt.Println(string(b))
-			return
-		}
-		if len(rows) == 0 {
-			fmt.Println("No pull requests found.")
-			return
-		}
-		headers := []string{"ID", "Title", "Author", "State", "Created"}
-		tables.Render(headers, func(yield func([]string) bool) {
-			for _, pr := range rows {
-				created := ""
-				if !pr.CreatedAt.IsZero() {
-					created = pr.CreatedAt.Format(time.RFC3339)[:19]
-				}
-				if !yield([]string{fmt.Sprintf("#%d", pr.Number), pr.Title, pr.Author, pr.State, created}) {
-					return
-				}
-			}
-		})
+		return prList(ctx, info, cmd.List)
 	case cmd.Create != nil:
-		handlePrCreate(info, cmd.Create)
+		return prCreate(ctx, info, cmd.Create)
 	case cmd.View != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		prNumber := cmd.View.Number
-		if prNumber <= 0 {
-			prNumber = resolvePRNumberFromBranch(ctx, info)
-			if prNumber <= 0 {
-				return
-			}
-		}
-		d, err := info.Provider.PrView(ctx, info, prNumber)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if cmd.View.JSON {
-			b, _ := json.MarshalIndent(d, "", "  ")
-			fmt.Println(string(b))
-			return
-		}
-		// Print details
-		fmt.Printf("%s (#%d)\n", d.Title, d.Number)
-		fmt.Printf("Author:   %s\n", d.Author)
-		state := d.State
-		if d.Merged {
-			state = "merged"
-		}
-		fmt.Printf("State:    %s\n", state)
-		if d.Draft {
-			fmt.Printf("Draft:    %v\n", d.Draft)
-		}
-		if d.Head != "" || d.Base != "" {
-			fmt.Printf("Branch:   %s -> %s\n", d.Head, d.Base)
-		}
-		if !d.CreatedAt.IsZero() {
-			fmt.Printf("Created:  %s\n", d.CreatedAt.Format(time.RFC3339)[:19])
-		}
-		if !d.UpdatedAt.IsZero() {
-			fmt.Printf("Updated:  %s\n", d.UpdatedAt.Format(time.RFC3339)[:19])
-		}
-		if d.URL != "" {
-			fmt.Printf("URL:      %s\n", d.URL)
-		}
-		if strings.TrimSpace(d.Body) != "" {
-			fmt.Println()
-			fmt.Println(d.Body)
-		}
+		return prView(ctx, info, cmd.View)
 	case cmd.Browse != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		// If a number is provided, open that PR directly
-		if cmd.Browse.Number > 0 {
-			d, err := info.Provider.PrView(ctx, info, cmd.Browse.Number)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				return
-			}
-			if strings.TrimSpace(d.URL) == "" {
-				fmt.Fprintf(os.Stderr, "Error: PR #%d has no web URL\n", cmd.Browse.Number)
-				return
-			}
-			if err := OpenBrowser(d.URL); err != nil {
-				fmt.Fprintf(os.Stderr, "Error opening browser: %v\n", err)
-				return
-			}
-			fmt.Printf("Opened %s\n", d.URL)
-			return
-		}
-		// Otherwise, find PR by current branch
-		branch, err := provider.CurrentBranch(info)
-		if err != nil || strings.TrimSpace(branch) == "" {
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
-			} else {
-				fmt.Fprintln(os.Stderr, "Error determining current branch")
-			}
-			return
-		}
-		rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{State: "open", Head: branch, Limit: 5})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if len(rows) == 0 {
-			fmt.Printf("No open pull request found for branch %q.\n", branch)
-			return
-		}
-		if len(rows) > 1 {
-			fmt.Fprintf(os.Stderr, "Found %d PRs for branch %q. Please specify a PR number.\n", len(rows), branch)
-			// Optionally show a short list
-			for i, pr := range rows {
-				if i >= 5 {
-					break
-				}
-				fmt.Fprintf(os.Stderr, "  #%d %s (%s)\n", pr.Number, pr.Title, pr.URL)
-			}
-			return
-		}
-		// Exactly one PR found
-		url := strings.TrimSpace(rows[0].URL)
-		if url == "" {
-			fmt.Fprintln(os.Stderr, "Error: PR has no web URL")
-			return
-		}
-		if err := OpenBrowser(url); err != nil {
-			fmt.Fprintf(os.Stderr, "Error opening browser: %v\n", err)
-			return
-		}
-		fmt.Printf("Opened %s\n", url)
+		return prBrowse(ctx, info, cmd.Browse)
 	case cmd.Checkout != nil:
-		fmt.Printf("[stub] pr checkout #%d\n", cmd.Checkout.Number)
+		return errors.New("pr checkout is not implemented yet")
 	case cmd.Merge != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		res, err := info.Provider.PrMerge(ctx, info, cmd.Merge.Number, provider.MergeOptions{
-			Method:       cmd.Merge.Method,
-			DeleteBranch: cmd.Merge.DeleteBranch,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if cmd.Merge.JSON {
-			b, _ := json.MarshalIndent(res, "", "  ")
-			fmt.Println(string(b))
-		} else {
-			state := "merged"
-			if res != nil && res.State != "" {
-				state = res.State
-			}
-			fmt.Printf("PR #%d %s.\n", cmd.Merge.Number, state)
-		}
+		return prMerge(ctx, info, cmd.Merge)
 	case cmd.Close != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		res, err := info.Provider.PrClose(ctx, info, cmd.Close.Number)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		// Optionally delete the source branch after close (best-effort)
-		if cmd.Close.DeleteBranch && res != nil && strings.TrimSpace(res.Head) != "" {
-			if err := info.Provider.BranchDelete(ctx, info, res.Head, provider.BranchDeleteOptions{Force: false}); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to delete branch %q: %v\n", res.Head, err)
-			}
-		}
-		if cmd.Close.JSON {
-			b, _ := json.MarshalIndent(res, "", "  ")
-			fmt.Println(string(b))
-		} else {
-			state := "closed"
-			if res != nil && res.State != "" {
-				state = res.State
-			}
-			fmt.Printf("PR #%d %s.\n", cmd.Close.Number, state)
-			if cmd.Close.DeleteBranch && res != nil && strings.TrimSpace(res.Head) != "" {
-				fmt.Printf("Deleted remote branch %q.\n", res.Head)
-			}
-		}
+		return prClose(ctx, info, cmd.Close)
 	case cmd.Comments != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		// Resolve PR number either from --number or by branch
-		prNumber := cmd.Comments.Number
-		if prNumber <= 0 {
-			branch := strings.TrimSpace(cmd.Comments.Branch)
-			if branch == "" {
-				b, err := provider.CurrentBranch(info)
-				if err != nil || strings.TrimSpace(b) == "" {
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
-					} else {
-						fmt.Fprintln(os.Stderr, "Error determining current branch")
-					}
-					return
-				}
-				branch = b
-			}
-			rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{State: "open", Head: branch, Limit: 5})
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				return
-			}
-			if len(rows) == 0 {
-				fmt.Printf("No open pull request found for branch %q.\n", branch)
-				return
-			}
-			if len(rows) > 1 {
-				fmt.Fprintf(os.Stderr, "Found %d PRs for branch %q. Please specify --number.\n", len(rows), branch)
-				for i, pr := range rows {
-					if i >= 5 {
-						break
-					}
-					fmt.Fprintf(os.Stderr, "  #%d %s (%s)\n", pr.Number, pr.Title, pr.URL)
-				}
-				return
-			}
-			prNumber = rows[0].Number
-		}
-		comments, err := info.Provider.PrComments(ctx, info, prNumber)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if cmd.Comments.JSON {
-			b, _ := json.MarshalIndent(comments, "", "  ")
-			fmt.Println(string(b))
-			return
-		}
-		if len(comments) == 0 {
-			fmt.Printf("No comments for PR #%d.\n", prNumber)
-			return
-		}
-		headers := []string{"ID", "When", "Author", "Resolved", "Comment"}
-		tables.Render(headers, func(yield func([]string) bool) {
-			for _, c := range comments {
-				when := ""
-				if !c.CreatedAt.IsZero() {
-					when = c.CreatedAt.Format(time.RFC3339)[:19]
-				}
-				body := c.Body
-				if path := strings.TrimSpace(c.Path); path != "" {
-					// Prepend file context if present
-					loc := path
-					if c.Line > 0 {
-						loc = fmt.Sprintf("%s:%d", path, c.Line)
-					}
-					body = fmt.Sprintf("[%s] %s", loc, body)
-				}
-				if !yield([]string{fmt.Sprintf("%d", c.ID), when, c.Author, strconv.FormatBool(c.Resolved), body}) {
-					return
-				}
-			}
-		})
+		return prComments(ctx, info, cmd.Comments)
 	case cmd.AddComment != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		// Parse file:line
-		filePath, line, err := parseFileLine(cmd.AddComment.Location)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		// Resolve PR number
-		prNumber := cmd.AddComment.Number
-		if prNumber <= 0 {
-			prNumber = resolvePRNumberFromBranch(ctx, info)
-			if prNumber <= 0 {
-				return
-			}
-		}
-		comment, err := info.Provider.PrAddComment(ctx, info, prNumber, provider.AddCommentOptions{
-			Path: filePath,
-			Line: line,
-			Body: cmd.AddComment.Body,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		if cmd.AddComment.JSON {
-			b, _ := json.MarshalIndent(comment, "", "  ")
-			fmt.Println(string(b))
-		} else {
-			fmt.Printf("Comment added to PR #%d at %s:%d\n", prNumber, filePath, line)
-		}
+		return prAddComment(ctx, info, cmd.AddComment)
 	case cmd.AddComments != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		prNumber := cmd.AddComments.Number
-		if prNumber <= 0 {
-			prNumber = resolvePRNumberFromBranch(ctx, info)
-			if prNumber <= 0 {
-				return
-			}
-		}
-		data, err := os.ReadFile(cmd.AddComments.FromJSON)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading JSON file: %v\n", err)
-			return
-		}
-		var comments []provider.AddCommentOptions
-		if err := json.Unmarshal(data, &comments); err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
-			return
-		}
-		var failed int
-		for _, c := range comments {
-			_, err := info.Provider.PrAddComment(ctx, info, prNumber, c)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error adding comment at %s:%d: %v\n", c.Path, c.Line, err)
-				failed++
-				continue
-			}
-			fmt.Printf("  added: %s:%d\n", c.Path, c.Line)
-		}
-		fmt.Printf("Done: %d/%d comments added to PR #%d.\n", len(comments)-failed, len(comments), prNumber)
+		return prAddComments(ctx, info, cmd.AddComments)
 	case cmd.Reply != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		prNumber := cmd.Reply.Number
-		if prNumber <= 0 {
-			prNumber = resolvePRNumberFromBranch(ctx, info)
-			if prNumber <= 0 {
-				return
-			}
-		}
-		reply, err := info.Provider.PrReplyComment(ctx, info, prNumber, cmd.Reply.CommentID, cmd.Reply.Body)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		fmt.Printf("Reply %d added to comment %d on PR #%d\n", reply.ID, cmd.Reply.CommentID, prNumber)
+		return prReply(ctx, info, cmd.Reply)
 	case cmd.Resolve != nil:
-		if info == nil {
-			fmt.Println("Cannot detect provider/repo info; aborting")
-			return
-		}
-		ctx := context.Background()
-		prNumber := cmd.Resolve.Number
-		if prNumber <= 0 {
-			prNumber = resolvePRNumberFromBranch(ctx, info)
-			if prNumber <= 0 {
-				return
-			}
-		}
-		err := info.Provider.PrResolveComment(ctx, info, prNumber, cmd.Resolve.CommentID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return
-		}
-		fmt.Printf("Comment %d on PR #%d resolved.\n", cmd.Resolve.CommentID, prNumber)
+		return prResolve(ctx, info, cmd.Resolve)
 	case cmd.Tasks != nil:
-		handlePrTasks(info, cmd.Tasks)
+		return prTasks(ctx, info, cmd.Tasks)
 	case cmd.AddTask != nil:
-		handlePrAddTask(info, cmd.AddTask)
+		return prAddTask(ctx, info, cmd.AddTask)
 	case cmd.ResolveTask != nil:
-		handlePrResolveTask(info, cmd.ResolveTask)
+		return prResolveTask(ctx, info, cmd.ResolveTask)
 	default:
-		fmt.Println("'gr pr' requires a subcommand. Try 'gr pr list'.")
+		return usageErrorf("'gr pr' requires a subcommand. Try 'gr pr list'")
 	}
 }
 
-// handlePrCreate encapsulates the complex PR creation flow, including optional editor editing.
-func handlePrCreate(info *provider.Info, create *PRCreateCmd) {
-	if info == nil {
-		fmt.Println("Cannot detect provider/repo info; aborting")
-		return
+func prList(ctx context.Context, info *provider.Info, cmd *PRListCmd) error {
+	rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{
+		State:    cmd.State,
+		Author:   cmd.Author,
+		Assignee: cmd.Assignee,
+		Base:     cmd.Base,
+		Head:     cmd.Head,
+		Limit:    cmd.Limit,
+	})
+	if err != nil {
+		return err
 	}
-	ctx := context.Background()
-	// Determine initial title/body defaults
+	if cmd.JSON {
+		if rows == nil {
+			rows = []provider.PullRequest{}
+		}
+		return printJSON(rows)
+	}
+	if len(rows) == 0 {
+		fmt.Println("No pull requests found.")
+		return nil
+	}
+	headers := []string{"ID", "Title", "Author", "State", "Created"}
+	tables.Render(headers, func(yield func([]string) bool) {
+		for _, pr := range rows {
+			if !yield([]string{fmt.Sprintf("#%d", pr.Number), pr.Title, pr.Author, pr.State, formatTime(pr.CreatedAt)}) {
+				return
+			}
+		}
+	})
+	return nil
+}
+
+func prView(ctx context.Context, info *provider.Info, cmd *PRViewCmd) error {
+	number, err := resolvePR(ctx, info, cmd.PR, cmd.PRSelector)
+	if err != nil {
+		return err
+	}
+	d, err := info.Provider.PrView(ctx, info, number)
+	if err != nil {
+		return err
+	}
+	if cmd.JSON {
+		return printJSON(d)
+	}
+	fmt.Printf("%s (#%d)\n", d.Title, d.Number)
+	fmt.Printf("Author:   %s\n", d.Author)
+	state := d.State
+	if d.Merged {
+		state = "merged"
+	}
+	fmt.Printf("State:    %s\n", state)
+	if d.Draft {
+		fmt.Printf("Draft:    %v\n", d.Draft)
+	}
+	if d.Head != "" || d.Base != "" {
+		fmt.Printf("Branch:   %s -> %s\n", d.Head, d.Base)
+	}
+	if s := formatTime(d.CreatedAt); s != "" {
+		fmt.Printf("Created:  %s\n", s)
+	}
+	if s := formatTime(d.UpdatedAt); s != "" {
+		fmt.Printf("Updated:  %s\n", s)
+	}
+	if d.URL != "" {
+		fmt.Printf("URL:      %s\n", d.URL)
+	}
+	if strings.TrimSpace(d.Body) != "" {
+		fmt.Println()
+		fmt.Println(d.Body)
+	}
+	return nil
+}
+
+func prBrowse(ctx context.Context, info *provider.Info, cmd *PRBrowseCmd) error {
+	number, err := resolvePR(ctx, info, cmd.PR, cmd.PRSelector)
+	if err != nil {
+		return err
+	}
+	d, err := info.Provider.PrView(ctx, info, number)
+	if err != nil {
+		return err
+	}
+	url := strings.TrimSpace(d.URL)
+	if url == "" {
+		return fmt.Errorf("PR #%d has no web URL", number)
+	}
+	if err := OpenBrowser(url); err != nil {
+		return fmt.Errorf("opening browser: %w", err)
+	}
+	fmt.Printf("Opened %s\n", url)
+	return nil
+}
+
+func prMerge(ctx context.Context, info *provider.Info, cmd *PRMergeCmd) error {
+	number, err := resolvePR(ctx, info, cmd.PR, cmd.PRSelector)
+	if err != nil {
+		return err
+	}
+	res, err := info.Provider.PrMerge(ctx, info, number, provider.MergeOptions{
+		Method:       cmd.Method,
+		DeleteBranch: cmd.DeleteBranch,
+	})
+	if err != nil {
+		return err
+	}
+	if cmd.JSON {
+		return printJSON(res)
+	}
+	state := "merged"
+	if res != nil && res.State != "" {
+		state = res.State
+	}
+	fmt.Printf("PR #%d %s.\n", number, state)
+	return nil
+}
+
+func prClose(ctx context.Context, info *provider.Info, cmd *PRCloseCmd) error {
+	number, err := resolvePR(ctx, info, cmd.PR, cmd.PRSelector)
+	if err != nil {
+		return err
+	}
+	res, err := info.Provider.PrClose(ctx, info, number)
+	if err != nil {
+		return err
+	}
+	var deleteErr error
+	deleted := false
+	if cmd.DeleteBranch && res != nil && strings.TrimSpace(res.Head) != "" {
+		deleteErr = info.Provider.BranchDelete(ctx, info, res.Head, provider.BranchDeleteOptions{Force: false})
+		deleted = deleteErr == nil
+	}
+	if cmd.JSON {
+		if err := printJSON(res); err != nil {
+			return err
+		}
+	} else {
+		state := "closed"
+		if res != nil && res.State != "" {
+			state = res.State
+		}
+		fmt.Printf("PR #%d %s.\n", number, state)
+		if deleted {
+			fmt.Printf("Deleted remote branch %q.\n", res.Head)
+		}
+	}
+	if deleteErr != nil {
+		return fmt.Errorf("PR #%d closed, but deleting branch %q failed: %w", number, res.Head, deleteErr)
+	}
+	return nil
+}
+
+func prComments(ctx context.Context, info *provider.Info, cmd *PRCommentsCmd) error {
+	number, err := resolvePR(ctx, info, "", cmd.PRSelector)
+	if err != nil {
+		return err
+	}
+	comments, err := info.Provider.PrComments(ctx, info, number)
+	if err != nil {
+		return err
+	}
+	if cmd.JSON {
+		if comments == nil {
+			comments = []provider.PRComment{}
+		}
+		return printJSON(comments)
+	}
+	if len(comments) == 0 {
+		fmt.Printf("No comments for PR #%d.\n", number)
+		return nil
+	}
+	headers := []string{"ID", "When", "Author", "Resolved", "Comment"}
+	tables.Render(headers, func(yield func([]string) bool) {
+		for _, c := range comments {
+			body := c.Body
+			if loc := formatLocation(c.Path, c.Line); loc != "" {
+				body = fmt.Sprintf("[%s] %s", loc, body)
+			}
+			if c.ParentID > 0 {
+				body = fmt.Sprintf("(reply to %d) %s", c.ParentID, body)
+			}
+			if !yield([]string{strconv.Itoa(c.ID), formatTime(c.CreatedAt), c.Author, strconv.FormatBool(c.Resolved), body}) {
+				return
+			}
+		}
+	})
+	return nil
+}
+
+func prAddComment(ctx context.Context, info *provider.Info, cmd *PRAddCommentCmd) error {
+	filePath, line, err := parseFileLine(cmd.Location)
+	if err != nil {
+		return err
+	}
+	number, err := resolvePR(ctx, info, "", cmd.PRSelector)
+	if err != nil {
+		return err
+	}
+	comment, err := info.Provider.PrAddComment(ctx, info, number, provider.AddCommentOptions{Path: filePath, Line: line, Body: cmd.Body})
+	if err != nil {
+		return err
+	}
+	if cmd.JSON {
+		return printJSON(comment)
+	}
+	fmt.Printf("Comment %d added to PR #%d at %s:%d\n", comment.ID, number, filePath, line)
+	return nil
+}
+
+// addCommentResult is the per-item outcome of `pr addcomments`.
+type addCommentResult struct {
+	Path    string              `json:"path"`
+	Line    int                 `json:"line"`
+	OK      bool                `json:"ok"`
+	Comment *provider.PRComment `json:"comment,omitempty"`
+	Error   string              `json:"error,omitempty"`
+}
+
+func prAddComments(ctx context.Context, info *provider.Info, cmd *PRAddCommentsCmd) error {
+	data, err := os.ReadFile(cmd.FromJSON)
+	if err != nil {
+		return fmt.Errorf("reading comments: %w", err)
+	}
+	var comments []provider.AddCommentOptions
+	if err := json.Unmarshal(data, &comments); err != nil {
+		return usageErrorf("parsing comments JSON: %v", err)
+	}
+	number, err := resolvePR(ctx, info, "", cmd.PRSelector)
+	if err != nil {
+		return err
+	}
+	results := make([]addCommentResult, 0, len(comments))
+	failed := 0
+	for _, c := range comments {
+		r := addCommentResult{Path: c.Path, Line: c.Line}
+		r.Comment, err = info.Provider.PrAddComment(ctx, info, number, c)
+		if err != nil {
+			r.Error = err.Error()
+			failed++
+		} else {
+			r.OK = true
+		}
+		results = append(results, r)
+		if !cmd.JSON {
+			if r.OK {
+				fmt.Printf("  added: %s:%d\n", c.Path, c.Line)
+			} else {
+				fmt.Fprintf(os.Stderr, "  failed: %s:%d: %s\n", c.Path, c.Line, r.Error)
+			}
+		}
+	}
+	if cmd.JSON {
+		if err := printJSON(results); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("Done: %d/%d comments added to PR #%d.\n", len(comments)-failed, len(comments), number)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d comments could not be added", failed, len(comments))
+	}
+	return nil
+}
+
+func prReply(ctx context.Context, info *provider.Info, cmd *PRReplyCmd) error {
+	number, err := resolvePR(ctx, info, "", cmd.PRSelector)
+	if err != nil {
+		return err
+	}
+	reply, err := info.Provider.PrReplyComment(ctx, info, number, cmd.CommentID, cmd.Body)
+	if err != nil {
+		return err
+	}
+	if cmd.JSON {
+		return printJSON(reply)
+	}
+	fmt.Printf("Reply %d added to comment %d on PR #%d\n", reply.ID, cmd.CommentID, number)
+	return nil
+}
+
+func prResolve(ctx context.Context, info *provider.Info, cmd *PRResolveCmd) error {
+	number, err := resolvePR(ctx, info, "", cmd.PRSelector)
+	if err != nil {
+		return err
+	}
+	if err := info.Provider.PrResolveComment(ctx, info, number, cmd.CommentID); err != nil {
+		return err
+	}
+	if cmd.JSON {
+		return printJSON(map[string]any{"pr": number, "comment_id": cmd.CommentID, "resolved": true})
+	}
+	fmt.Printf("Comment %d on PR #%d resolved.\n", cmd.CommentID, number)
+	return nil
+}
+
+// prCreate handles PR creation, including optional editor editing.
+func prCreate(ctx context.Context, info *provider.Info, create *PRCreateCmd) error {
 	title := strings.TrimSpace(create.Title)
 	body := create.Body
 	editMsgPath := ""
@@ -445,61 +364,10 @@ func handlePrCreate(info *provider.Info, create *PRCreateCmd) {
 	}
 	// If --edit is requested, open editor with PR_EDITMSG in gitdir
 	if create.Edit {
-		editDir := cmp.Or(info.Worktree, info.GitDir)
-		msgPath := filepath.Join(editDir, "PR_EDITMSG")
-		initial := strings.TrimRight(title, "\n") + "\n\n" + strings.TrimRight(body, "\n") + "\n"
-		if err := os.WriteFile(msgPath, []byte(initial), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot write %s: %v\n", msgPath, err)
-			return
-		}
-		editMsgPath = msgPath
-		editor := strings.TrimSpace(os.Getenv("VISUAL"))
-		if editor == "" {
-			editor = strings.TrimSpace(os.Getenv("EDITOR"))
-		}
-		if editor == "" {
-			editor = "vi"
-		}
-		cmdline := exec.Command(editor, msgPath)
-		cmdline.Stdin = os.Stdin
-		cmdline.Stdout = os.Stdout
-		cmdline.Stderr = os.Stderr
-		if err := cmdline.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: editor failed: %v\n", err)
-			return
-		}
-		// Read back content and parse
-		b, err := os.ReadFile(msgPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: cannot read %s: %v\n", msgPath, err)
-			return
-		}
-		content := strings.TrimSpace(string(b))
-		if content == "" {
-			fmt.Println("Aborted: empty PR message.")
-			return
-		}
-		lines := strings.Split(content, "\n")
-		title = strings.TrimSpace(lines[0])
-		// Separate body by first blank line
-		bodyStart := -1
-		for i := 1; i < len(lines); i++ {
-			if strings.TrimSpace(lines[i]) == "" {
-				bodyStart = i + 1
-				break
-			}
-		}
-		if bodyStart == -1 {
-			bodyStart = 1
-		}
-		if bodyStart < len(lines) {
-			body = strings.TrimSpace(strings.Join(lines[bodyStart:], "\n"))
-		} else {
-			body = ""
-		}
-		if title == "" {
-			fmt.Println("Aborted: empty PR title.")
-			return
+		var err error
+		editMsgPath = filepath.Join(cmp.Or(info.Worktree, info.GitDir), "PR_EDITMSG")
+		if title, body, err = editPRMessage(editMsgPath, title, body); err != nil {
+			return err
 		}
 	}
 	res, err := info.Provider.PrCreate(ctx, info, provider.CreateOptions{
@@ -512,66 +380,87 @@ func handlePrCreate(info *provider.Info, create *PRCreateCmd) {
 		DeleteAfterMerge: !create.NoDeleteAfterMerge,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return
+		return err
 	}
-	if create.Edit && editMsgPath != "" {
+	if editMsgPath != "" {
 		_ = os.Remove(editMsgPath)
 	}
 	if create.JSON {
-		b, _ := json.MarshalIndent(res, "", "  ")
-		fmt.Println(string(b))
-	} else {
-		fmt.Printf("Created PR #%d: %s\n", res.Number, res.URL)
+		return printJSON(res)
 	}
+	fmt.Printf("Created PR #%d: %s\n", res.Number, res.URL)
+	return nil
+}
+
+// editPRMessage lets the user edit title and body in $VISUAL/$EDITOR. The
+// first line is the title; the body starts after the first blank line.
+func editPRMessage(msgPath, title, body string) (string, string, error) {
+	initial := strings.TrimRight(title, "\n") + "\n\n" + strings.TrimRight(body, "\n") + "\n"
+	if err := os.WriteFile(msgPath, []byte(initial), 0644); err != nil {
+		return "", "", fmt.Errorf("cannot write %s: %w", msgPath, err)
+	}
+	editor := cmp.Or(strings.TrimSpace(os.Getenv("VISUAL")), strings.TrimSpace(os.Getenv("EDITOR")), "vi")
+	cmdline := exec.Command(editor, msgPath)
+	cmdline.Stdin = os.Stdin
+	cmdline.Stdout = os.Stdout
+	cmdline.Stderr = os.Stderr
+	if err := cmdline.Run(); err != nil {
+		return "", "", fmt.Errorf("editor failed: %w", err)
+	}
+	b, err := os.ReadFile(msgPath)
+	if err != nil {
+		return "", "", fmt.Errorf("cannot read %s: %w", msgPath, err)
+	}
+	content := strings.TrimSpace(string(b))
+	if content == "" {
+		return "", "", usageErrorf("aborted: empty PR message")
+	}
+	lines := strings.Split(content, "\n")
+	title = strings.TrimSpace(lines[0])
+	bodyStart := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			bodyStart = i + 1
+			break
+		}
+	}
+	if bodyStart == -1 {
+		bodyStart = 1
+	}
+	body = ""
+	if bodyStart < len(lines) {
+		body = strings.TrimSpace(strings.Join(lines[bodyStart:], "\n"))
+	}
+	if title == "" {
+		return "", "", usageErrorf("aborted: empty PR title")
+	}
+	return title, body, nil
 }
 
 // parseFileLine parses "file:line" into path and line number.
 func parseFileLine(s string) (string, int, error) {
 	i := strings.LastIndex(s, ":")
 	if i < 0 {
-		return "", 0, fmt.Errorf("invalid location %q: expected file:line", s)
+		return "", 0, usageErrorf("invalid location %q: expected file:line", s)
 	}
 	line, err := strconv.Atoi(s[i+1:])
 	if err != nil || line <= 0 {
-		return "", 0, fmt.Errorf("invalid line number in %q", s)
+		return "", 0, usageErrorf("invalid line number in %q", s)
+	}
+	if s[:i] == "" {
+		return "", 0, usageErrorf("invalid location %q: missing file", s)
 	}
 	return s[:i], line, nil
 }
 
-// resolvePRNumberFromBranch finds the open PR for the current branch. Returns 0 on failure.
-func resolvePRNumberFromBranch(ctx context.Context, info *provider.Info) int {
-	return resolvePRNumberForBranch(ctx, info, "")
-}
-
-// resolvePRNumberForBranch finds the open PR for branch (current branch if
-// empty). Returns 0 on failure after reporting the problem on stderr.
-func resolvePRNumberForBranch(ctx context.Context, info *provider.Info, branch string) int {
-	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		b, err := provider.CurrentBranch(info)
-		if err != nil || strings.TrimSpace(b) == "" {
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error determining current branch: %v\n", err)
-			} else {
-				fmt.Fprintln(os.Stderr, "Error determining current branch")
-			}
-			return 0
-		}
-		branch = b
+// formatLocation renders "path:line", "path" or "".
+func formatLocation(path string, line int) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
 	}
-	rows, err := info.Provider.PrList(ctx, info, provider.ListOptions{State: "open", Head: branch, Limit: 5})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 0
+	if line > 0 {
+		return fmt.Sprintf("%s:%d", path, line)
 	}
-	if len(rows) == 0 {
-		fmt.Fprintf(os.Stderr, "No open pull request found for branch %q.\n", branch)
-		return 0
-	}
-	if len(rows) > 1 {
-		fmt.Fprintf(os.Stderr, "Found %d PRs for branch %q. Please specify --number.\n", len(rows), branch)
-		return 0
-	}
-	return rows[0].Number
+	return path
 }

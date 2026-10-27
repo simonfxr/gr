@@ -18,13 +18,13 @@ type Args struct {
 	Branch *BranchCmd `arg:"subcommand:branch" help:"branch commands"`
 }
 
-// `gr pr` group and its subcommands (stubs for now)
+// `gr pr` group and its subcommands
 type PRCmd struct {
 	List        *PRListCmd        `arg:"subcommand:list" help:"list pull requests"`
 	Create      *PRCreateCmd      `arg:"subcommand:create" help:"create a pull request"`
 	View        *PRViewCmd        `arg:"subcommand:view" help:"view a pull request"`
 	Browse      *PRBrowseCmd      `arg:"subcommand:browse" help:"open a pull request in the browser"`
-	Checkout    *PRCheckoutCmd    `arg:"subcommand:checkout" help:"checkout a pull request branch"`
+	Checkout    *PRCheckoutCmd    `arg:"subcommand:checkout" help:"checkout a pull request branch (not implemented yet)"`
 	Merge       *PRMergeCmd       `arg:"subcommand:merge" help:"merge a pull request"`
 	Close       *PRCloseCmd       `arg:"subcommand:close" help:"close a pull request"`
 	Comments    *PRCommentsCmd    `arg:"subcommand:comments" help:"show review comments for a pull/merge request"`
@@ -37,27 +37,8 @@ type PRCmd struct {
 	ResolveTask *PRResolveTaskCmd `arg:"subcommand:resolvetask" help:"resolve (or reopen) a pull request task"`
 }
 
-type PRTasksCmd struct {
-	Number int    `arg:"--number,-n" help:"pull request number"`
-	Branch string `arg:"--branch,-b" help:"branch to resolve PR from when --number is not given (default: current branch)"`
-	State  string `arg:"--state" help:"filter by state: open, resolved, all" default:"all"`
-	JSON   bool   `arg:"--json" help:"output as JSON"`
-}
-
-type PRAddTaskCmd struct {
-	Number    int    `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
-	CommentID int    `arg:"--comment,-c" help:"attach the task to this comment ID"`
-	Pending   bool   `arg:"--pending" help:"create as pending (part of your unsubmitted review)"`
-	Body      string `arg:"positional,required" help:"task text"`
-	JSON      bool   `arg:"--json" help:"output as JSON"`
-}
-
-type PRResolveTaskCmd struct {
-	Number int  `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
-	TaskID int  `arg:"positional,required" help:"task ID"`
-	Reopen bool `arg:"--reopen" help:"mark the task as unresolved instead"`
-	JSON   bool `arg:"--json" help:"output as JSON"`
-}
+// Commands targeting a single PR embed PRSelector (-n/--number, -b/--branch).
+// Without either, the open PR of the current branch is used.
 
 type PRListCmd struct {
 	State    string `arg:"--state" help:"filter by state: open, closed, merged, all" default:"open"`
@@ -83,58 +64,86 @@ type PRCreateCmd struct {
 }
 
 type PRViewCmd struct {
-	Number int  `arg:"positional" help:"pull request number (optional); if omitted, use current branch"`
-	JSON   bool `arg:"--json" help:"output as JSON"`
+	PR string `arg:"positional" help:"pull request number or URL"`
+	PRSelector
+	JSON bool `arg:"--json" help:"output as JSON"`
 }
 
 type PRBrowseCmd struct {
-	Number int `arg:"positional" help:"pull request number (optional); if omitted, use current branch"`
-}
-
-type PRCommentsCmd struct {
-	Number int    `arg:"--number,-n" help:"pull request/merge request number"`
-	Branch string `arg:"--branch,-b" help:"branch to resolve PR from when --number is not given (default: current branch)"`
-	JSON   bool   `arg:"--json" help:"output as JSON"`
-}
-
-type PRAddCommentCmd struct {
-	Number   int    `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
-	Location string `arg:"positional,required" help:"file:line location for the inline comment"`
-	Body     string `arg:"positional,required" help:"comment text"`
-	JSON     bool   `arg:"--json" help:"output as JSON"`
-}
-
-type PRAddCommentsCmd struct {
-	Number   int    `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
-	FromJSON string `arg:"--from-json,required" help:"path to JSON file with comments array [{path, line, body}, ...]"`
-}
-
-type PRReplyCmd struct {
-	Number    int    `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
-	CommentID int    `arg:"positional,required" help:"comment ID to reply to"`
-	Body      string `arg:"positional,required" help:"reply text"`
-}
-
-type PRResolveCmd struct {
-	Number    int `arg:"--number,-n" help:"pull request number (resolved from current branch if omitted)"`
-	CommentID int `arg:"positional,required" help:"comment ID to resolve"`
+	PR string `arg:"positional" help:"pull request number or URL"`
+	PRSelector
 }
 
 type PRCheckoutCmd struct {
-	Number int `arg:"positional,required" help:"pull request number"`
+	PR string `arg:"positional" help:"pull request number or URL"`
+	PRSelector
 }
 
 type PRMergeCmd struct {
-	Number       int    `arg:"positional,required" help:"pull request number"`
+	PR string `arg:"positional" help:"pull request number or URL"`
+	PRSelector
 	Method       string `arg:"--method" help:"merge method: merge|squash|rebase"`
 	DeleteBranch bool   `arg:"--delete-branch" help:"delete source branch after merge"`
 	JSON         bool   `arg:"--json" help:"output as JSON"`
 }
 
 type PRCloseCmd struct {
-	Number       int  `arg:"positional,required" help:"pull request number"`
+	PR string `arg:"positional" help:"pull request number or URL"`
+	PRSelector
 	DeleteBranch bool `arg:"--delete-branch" help:"delete source branch after closing"`
 	JSON         bool `arg:"--json" help:"output as JSON"`
+}
+
+type PRCommentsCmd struct {
+	PRSelector
+	JSON bool `arg:"--json" help:"output as JSON"`
+}
+
+type PRAddCommentCmd struct {
+	PRSelector
+	Location string `arg:"positional,required" help:"file:line location for the inline comment"`
+	Body     string `arg:"positional,required" help:"comment text"`
+	JSON     bool   `arg:"--json" help:"output as JSON"`
+}
+
+type PRAddCommentsCmd struct {
+	PRSelector
+	FromJSON string `arg:"--from-json,required" help:"path to JSON file with comments array [{path, line, body}, ...]"`
+	JSON     bool   `arg:"--json" help:"output per-comment results as JSON"`
+}
+
+type PRReplyCmd struct {
+	PRSelector
+	CommentID int    `arg:"positional,required" help:"comment ID to reply to"`
+	Body      string `arg:"positional,required" help:"reply text"`
+	JSON      bool   `arg:"--json" help:"output as JSON"`
+}
+
+type PRResolveCmd struct {
+	PRSelector
+	CommentID int  `arg:"positional,required" help:"comment ID to resolve"`
+	JSON      bool `arg:"--json" help:"output as JSON"`
+}
+
+type PRTasksCmd struct {
+	PRSelector
+	State string `arg:"--state" help:"filter by state: open, resolved, all" default:"all"`
+	JSON  bool   `arg:"--json" help:"output as JSON"`
+}
+
+type PRAddTaskCmd struct {
+	PRSelector
+	CommentID int    `arg:"--comment,-c" help:"attach the task to this comment ID"`
+	Pending   bool   `arg:"--pending" help:"create as pending (part of your unsubmitted review)"`
+	Body      string `arg:"positional,required" help:"task text"`
+	JSON      bool   `arg:"--json" help:"output as JSON"`
+}
+
+type PRResolveTaskCmd struct {
+	PRSelector
+	TaskID int  `arg:"positional,required" help:"task ID"`
+	Reopen bool `arg:"--reopen" help:"mark the task as unresolved instead"`
+	JSON   bool `arg:"--json" help:"output as JSON"`
 }
 
 // Branch command group
@@ -174,17 +183,23 @@ type BranchBrowseCmd struct {
 }
 
 func (Args) Description() string {
-	return "gr - git remote PR helper (stubs)"
+	return "gr - git remote PR helper"
+}
+
+func (Args) Epilogue() string {
+	return "Exit status: 0 success, 1 error, 2 invalid usage, 3 pull request/comment/task not found or ambiguous.\n" +
+		"With --json, errors are printed to stderr as JSON: {error, kind, exit_code, candidates}."
 }
 
 // lazy wraps a computation and ensures it runs at most once per process
 // (thread-safe via sync.Once). Useful for deferring detection until needed.
-func lazy[T any](f func() T) func() T {
+func lazy[T any](f func() (T, error)) func() (T, error) {
 	once := sync.Once{}
 	var v T
-	return func() T {
-		once.Do(func() { v = f() })
-		return v
+	var err error
+	return func() (T, error) {
+		once.Do(func() { v, err = f() })
+		return v, err
 	}
 }
 
@@ -193,54 +208,59 @@ func lazy[T any](f func() T) func() T {
 var chdir string
 
 // loadConfig lazily loads user configuration from ~/.config/gr/config.toml
-var loadConfig = lazy(func() *config.Config {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	return cfg
-})
+var loadConfig = lazy(config.Load)
 
 // detectLocal lazily resolves the local git repository (including worktree-aware
 // paths and a go-git handle). It never performs network probing. This is used
 // by commands that only need local repo state (e.g., local-only branch ops).
-var detectLocal = lazy(func() *provider.LocalRepo {
+var detectLocal = lazy(func() (*provider.LocalRepo, error) {
 	local, err := provider.FindLocalRepo(chdir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Repository detection error: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("repository detection: %w", err)
 	}
-	return local
+	return local, nil
 })
 
 // detectProvider lazily resolves full provider/repo information based on the
 // already-detected local repository. This may inspect remotes and probe the
 // network for self-hosted instances. Used by PR commands and remote branch ops.
-var detectProvider = lazy(func() *provider.Info {
-	local := detectLocal()
-	info, err := provider.DetectFromRepo(local, loadConfig())
+var detectProvider = lazy(func() (*provider.Info, error) {
+	local, err := detectLocal()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Provider detection error: %v\n", err)
-		os.Exit(1)
+		return nil, err
 	}
-	return info
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	info, err := provider.DetectFromRepo(local, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("provider detection: %w", err)
+	}
+	return info, nil
 })
 
 func main() {
 	args := &Args{}
-	arg.MustParse(args)
-
+	p := arg.MustParse(args)
 	chdir = args.Chdir
+	if err := run(args); err != nil {
+		reportError(os.Stderr, err, wantsJSON(p.Subcommand()))
+		os.Exit(exitCode(err))
+	}
+}
 
+func run(args *Args) error {
 	switch {
 	case args.PR != nil:
-		// PR commands require provider info
-		runPR(args.PR, detectProvider())
+		info, err := detectProvider()
+		if err != nil {
+			return err
+		}
+		return runPR(args.PR, info)
 	case args.Branch != nil:
-		runBranch(args.Branch, detectLocal())
+		return runBranch(args.Branch)
 	default:
-		fmt.Fprintln(os.Stderr, "Error: no command provided. Try 'gr pr list' or 'gr --help'.")
-		os.Exit(1)
+		return usageErrorf("no command provided. Try 'gr pr list' or 'gr --help'")
 	}
 }

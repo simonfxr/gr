@@ -13,10 +13,16 @@ go install github.com/simonfxr/gr@latest
 ```bash
 gr pr list              # List pull requests
 gr pr create            # Create a pull request
-gr pr view <number>     # View PR details
-gr pr merge <number>    # Merge a PR
-gr pr close <number>    # Close a PR
-gr pr browse [number]   # Open PR in browser
+gr pr view [PR]         # View PR details
+gr pr merge [PR]        # Merge a PR
+gr pr close [PR]        # Close a PR
+gr pr browse [PR]       # Open PR in browser
+
+gr pr comments          # List review comments
+gr pr addcomment <file:line> <text>
+gr pr addcomments --from-json <file>
+gr pr reply <comment-id> <text>
+gr pr resolve <comment-id>
 
 gr pr tasks             # List PR tasks (Bitbucket)
 gr pr addtask <text>    # Create a PR task
@@ -27,6 +33,30 @@ gr branch rename <old> <new>
 gr branch delete <name>
 gr branch browse [name] # Open branch in browser
 ```
+
+### Selecting a pull request
+
+Every command that operates on a single PR accepts:
+
+- `-n/--number` with a number (`42`, `#42`) or the PR's web URL. URLs must
+  belong to the current repository.
+- `-b/--branch BRANCH` to use the open PR of that branch.
+- Neither: the open PR of the current branch.
+
+`view`, `browse`, `merge`, `close` and `checkout` also take the PR as a
+positional argument (`gr pr view 42`).
+
+### Scripting and agents
+
+- **Exit status:** `0` success, `1` error, `2` invalid usage, `3` PR/comment/task
+  not found or PR selection ambiguous. Empty listings exit `0`.
+- **JSON:** `--json` is available on every command that produces data; field
+  names are snake_case. With `--json`, errors are written to stderr as
+  `{"error": "...", "kind": "usage|not_found|ambiguous|error", "exit_code": N}`;
+  ambiguous PR selection adds `"candidates"` (the matching PRs).
+- **Batch comments:** `addcomments --json` prints one result per input item
+  (`{path, line, ok, comment | error}`) and exits `1` if any item failed.
+- **Tables:** when stdout is not a terminal, tables are printed as CSV.
 
 ### Bitbucket listings
 
@@ -61,9 +91,8 @@ gr pr resolvetask 5678
 gr pr resolvetask --reopen 5678
 ```
 
-Without `-n`, the PR is resolved from the open PR of the current (or `-b`)
-branch. Table output shows task ID, resolved/pending state, creator, creation
-time, attached comment ID, and text; `--json` emits the same fields.
+Table output shows task ID, resolved/pending state, creator, creation time,
+attached comment ID, and text; `--json` emits the same fields.
 
 ## Configuration
 

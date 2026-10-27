@@ -60,7 +60,9 @@ func TestPRTasksOutput(t *testing.T) {
 
 	t.Run("json", func(t *testing.T) {
 		out := captureStdout(t, func() {
-			runPR(&PRCmd{Tasks: &PRTasksCmd{Number: 42, State: "all", JSON: true}}, info)
+			if err := runPR(&PRCmd{Tasks: &PRTasksCmd{PRSelector: PRSelector{Number: "42"}, State: "all", JSON: true}}, info); err != nil {
+				t.Fatal(err)
+			}
 		})
 		var tasks []map[string]any
 		if err := json.Unmarshal([]byte(out), &tasks); err != nil {
@@ -72,7 +74,9 @@ func TestPRTasksOutput(t *testing.T) {
 	})
 	t.Run("table", func(t *testing.T) {
 		out := captureStdout(t, func() {
-			runPR(&PRCmd{Tasks: &PRTasksCmd{Number: 42, State: "all"}}, info)
+			if err := runPR(&PRCmd{Tasks: &PRTasksCmd{PRSelector: PRSelector{Number: "42"}, State: "all"}}, info); err != nil {
+				t.Fatal(err)
+			}
 		})
 		rows, err := csv.NewReader(strings.NewReader(out)).ReadAll()
 		if err != nil {
