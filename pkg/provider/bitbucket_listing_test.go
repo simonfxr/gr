@@ -32,7 +32,7 @@ func TestBitbucketPRRequestParameters(t *testing.T) {
 		{"", []string{"OPEN"}},
 		{"open", []string{"OPEN"}},
 		{" MERGED ", []string{"MERGED"}},
-		{"closed", []string{"MERGED", "DECLINED", "SUPERSEDED"}},
+		{"closed", []string{"DECLINED", "SUPERSEDED"}},
 		{"all", []string{"OPEN", "MERGED", "DECLINED", "SUPERSEDED"}},
 	} {
 		t.Run(tc.state, func(t *testing.T) {
@@ -64,7 +64,7 @@ func TestBitbucketPRRequestParameters(t *testing.T) {
 				}
 				fmt.Fprint(w, `{"values":[]}`)
 			})
-			_, err := prListBitbucket(context.Background(), info, ListOptions{
+			_, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{
 				State: tc.state, Author: "{abc}", Base: "main", Head: "feature/\"quoted\\branch", Limit: 20,
 			})
 			if err != nil || requests != 1 {
@@ -85,7 +85,7 @@ func TestBitbucketPRLimitStopsBeforeNextPage(t *testing.T) {
 			{"id":9,"title":"Latest","state":"OPEN","created_on":"2026-09-08T12:00:00Z","author":{"nickname":"simon"},"links":{"html":{"href":"https://example.org/pr/9"}}},
 			{"id":8},{"id":7}]}`)
 	})
-	prs, err := prListBitbucket(context.Background(), info, ListOptions{Limit: 2})
+	prs, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{Limit: 2})
 	if err != nil || len(prs) != 2 || requests != 1 {
 		t.Fatalf("prs=%v requests=%d err=%v", prs, requests, err)
 	}
@@ -115,7 +115,7 @@ func TestBitbucketPRNameFilterPaginatesUntilEnoughExactMatches(t *testing.T) {
 				{"id":2,"author":{"nickname":"Simon"}}]}`)
 		}
 	})
-	prs, err := prListBitbucket(context.Background(), info, ListOptions{Author: "Simon", Limit: 2})
+	prs, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{Author: "Simon", Limit: 2})
 	if err != nil || requests != 2 || len(prs) != 2 {
 		t.Fatalf("prs=%v requests=%d err=%v", prs, requests, err)
 	}
@@ -138,7 +138,7 @@ func TestBitbucketPRNameFilterFallback(t *testing.T) {
 		}
 		fmt.Fprint(w, `{"values":[{"id":1,"author":{"display_name":"Other"}},{"id":2,"author":{"display_name":"Simon Reiser"}}]}`)
 	})
-	prs, err := prListBitbucket(context.Background(), info, ListOptions{
+	prs, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{
 		Author: "simon reiser", Base: "main", State: "merged", Limit: 1,
 	})
 	if err != nil || requests != 2 || len(prs) != 1 || prs[0].Number != 2 {
@@ -166,12 +166,12 @@ func TestBitbucketPRPageSizeCap(t *testing.T) {
 						http.Error(w, "unsupported author.display_name", http.StatusBadRequest)
 						return
 					}
-					if !reflect.DeepEqual(q["state"], []string{"MERGED", "DECLINED", "SUPERSEDED"}) {
+					if !reflect.DeepEqual(q["state"], []string{"DECLINED", "SUPERSEDED"}) {
 						t.Errorf("lost closed-state filter: %v", q)
 					}
-					fmt.Fprint(w, `{"values":[{"id":1,"state":"MERGED","author":{"display_name":"Simon Reiser"}}]}`)
+					fmt.Fprint(w, `{"values":[{"id":1,"state":"DECLINED","author":{"display_name":"Simon Reiser"}}]}`)
 				})
-				prs, err := prListBitbucket(context.Background(), info, ListOptions{
+				prs, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{
 					Author: author, State: "closed", Limit: limit,
 				})
 				wantRequests := 1
@@ -202,7 +202,7 @@ func TestBitbucketPRAccountIDAndUnlimitedPagination(t *testing.T) {
 					fmt.Fprint(w, `{"values":[{"id":1,"author":{"display_name":"Display name"}}]}`)
 				}
 			})
-			prs, err := prListBitbucket(context.Background(), info, ListOptions{Author: "557058:abc", Limit: limit})
+			prs, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{Author: "557058:abc", Limit: limit})
 			if err != nil || requests != 2 || len(prs) != 1 || prs[0].Author != "Display name" {
 				t.Fatalf("prs=%v requests=%d err=%v", prs, requests, err)
 			}
@@ -218,7 +218,7 @@ func TestBitbucketListingErrors(t *testing.T) {
 				requests++
 				http.Error(w, "failure", status)
 			})
-			_, err := prListBitbucket(context.Background(), info, ListOptions{Author: "Simon"})
+			_, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{Author: "Simon"})
 			var apiErr *bitbucketAPIError
 			if !errors.As(err, &apiErr) || apiErr.status != status || requests != 1 {
 				t.Fatalf("requests=%d err=%v", requests, err)
@@ -236,7 +236,7 @@ func TestBitbucketListingBasicAuthAndCancellation(t *testing.T) {
 		fmt.Fprint(w, `{"values":[]}`)
 	})
 	t.Setenv("BITBUCKET_USERNAME", "test-user")
-	if _, err := prListBitbucket(context.Background(), info, ListOptions{}); err != nil {
+	if _, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -254,7 +254,7 @@ func TestBitbucketListingRejectsUnsafeOrRepeatedNext(t *testing.T) {
 				requests++
 				json.NewEncoder(w).Encode(map[string]any{"next": next, "values": []any{}})
 			})
-			_, err := prListBitbucket(context.Background(), info, ListOptions{})
+			_, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{})
 			if err == nil || requests > 2 {
 				t.Fatalf("requests=%d err=%v", requests, err)
 			}
@@ -274,7 +274,7 @@ func TestBitbucketListingRejectsRedirectAndMalformedJSON(t *testing.T) {
 					fmt.Fprint(w, `{"values":`)
 				}
 			})
-			_, err := prListBitbucket(context.Background(), info, ListOptions{})
+			_, err := ProviderBitbucket.PrList(context.Background(), info, ListOptions{})
 			if err == nil || requests != 1 {
 				t.Fatalf("requests=%d err=%v", requests, err)
 			}

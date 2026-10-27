@@ -22,7 +22,7 @@ func TestGitHubPrView(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := &PRDetails{
-		Number: 7, Title: "Add x", Body: "desc", Author: "alice", State: "open",
+		Number: 7, Title: "Add x", Body: "desc", Author: "alice", State: "open", ProviderState: "open",
 		CreatedAt: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC),
 		Draft:     true, Base: "main", Head: "feature/x",
@@ -159,5 +159,41 @@ func TestGitHubPrCreate(t *testing.T) {
 	d, err := ProviderGitHub.PrCreate(t.Context(), info, CreateOptions{Title: "Add x", Body: "desc", Base: "main", Head: "feature/x", Draft: true})
 	if err != nil || d.Number != 7 || !d.Draft {
 		t.Errorf("got %+v, %v", d, err)
+	}
+}
+
+func TestGitHubPrListStates(t *testing.T) {
+	const page = `[{"number":1,"state":"open"},{"number":2,"state":"closed"},
+		{"number":3,"state":"closed","merged_at":"2026-10-03T10:00:00Z"}]`
+	for _, tc := range []struct {
+		state, apiState string
+		want            []int
+	}{
+		{"open", "open", []int{1}},
+		{"closed", "closed", []int{2}},
+		{"merged", "closed", []int{3}},
+		{"all", "all", []int{1, 2, 3}},
+	} {
+		f, info := fakeGitHub(t)
+		f.handle("GET /api/v3/repos/owner/repo/pulls", func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("state"); got != tc.apiState {
+				t.Errorf("%s: API state = %q, want %q", tc.state, got, tc.apiState)
+			}
+			writeJSON(w, http.StatusOK, page)
+		})
+		prs, err := ProviderGitHub.PrList(t.Context(), info, ListOptions{State: tc.state})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var numbers []int
+		for _, pr := range prs {
+			numbers = append(numbers, pr.Number)
+			if pr.State != tc.state && tc.state != "all" {
+				t.Errorf("%s: PR #%d has state %s", tc.state, pr.Number, pr.State)
+			}
+		}
+		if !reflect.DeepEqual(numbers, tc.want) {
+			t.Errorf("%s: numbers = %v, want %v", tc.state, numbers, tc.want)
+		}
 	}
 }

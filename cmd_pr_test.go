@@ -93,3 +93,21 @@ func TestPRCommentsResolutionOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatState(t *testing.T) {
+	for _, tc := range []struct {
+		state, providerState string
+		draft                bool
+		want                 string
+	}{
+		{"open", "opened", false, "open"},
+		{"open", "open", true, "open, draft"},
+		{"merged", "closed", false, "merged"}, // GitHub
+		{"closed", "declined", false, "closed (declined)"},
+		{"open", "locked", false, "open (locked)"},
+	} {
+		if got := formatState(tc.state, tc.providerState, tc.draft); got != tc.want {
+			t.Errorf("formatState(%q, %q, %v) = %q, want %q", tc.state, tc.providerState, tc.draft, got, tc.want)
+		}
+	}
+}

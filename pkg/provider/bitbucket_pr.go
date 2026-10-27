@@ -44,20 +44,34 @@ type bitbucketPRRef struct {
 
 func (pr *bitbucketPR) toPRDetails() *PRDetails {
 	d := &PRDetails{
-		Number: pr.ID,
-		Title:  pr.Title,
-		Body:   pr.Description,
-		Author: pr.Author.name(),
-		State:  strings.ToLower(pr.State),
-		Merged: strings.EqualFold(pr.State, "MERGED"),
-		Draft:  pr.Draft,
-		Base:   pr.Destination.Branch.Name,
-		Head:   pr.Source.Branch.Name,
-		URL:    pr.Links.HTML.Href,
+		Number:        pr.ID,
+		Title:         pr.Title,
+		Body:          pr.Description,
+		Author:        pr.Author.name(),
+		State:         bitbucketState(pr.State),
+		ProviderState: strings.ToLower(pr.State),
+		Merged:        strings.EqualFold(pr.State, "MERGED"),
+		Draft:         pr.Draft,
+		Base:          pr.Destination.Branch.Name,
+		Head:          pr.Source.Branch.Name,
+		URL:           pr.Links.HTML.Href,
 	}
 	d.CreatedAt, _ = time.Parse(time.RFC3339, pr.CreatedOn)
 	d.UpdatedAt, _ = time.Parse(time.RFC3339, pr.UpdatedOn)
 	return d
+}
+
+// bitbucketState normalizes a Bitbucket PR state (OPEN, MERGED, DECLINED,
+// SUPERSEDED).
+func bitbucketState(state string) string {
+	switch strings.ToUpper(state) {
+	case "OPEN":
+		return StateOpen
+	case "MERGED":
+		return StateMerged
+	default:
+		return StateClosed
+	}
 }
 
 // bitbucketGetPR fetches a single pull request.

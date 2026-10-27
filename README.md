@@ -83,6 +83,10 @@ MSG
   names are snake_case. With `--json`, errors are written to stderr as
   `{"error": "...", "kind": "usage|not_found|ambiguous|auth|interrupted|error", "exit_code": N}`;
   ambiguous PR selection adds `"candidates"` (the matching PRs).
+- **PR states:** `state` is `open`, `closed` (closed without merging) or
+  `merged` on every provider; `provider_state` keeps the provider's own value
+  (e.g. GitLab `opened`/`locked`, Bitbucket `declined`/`superseded`).
+  `pr list --state` takes `open`, `closed`, `merged` or `all`.
 - **Batch comments:** `addcomments --json` prints one result per input item
   (`{path, line, ok, comment | error}`) and exits `1` if any item failed.
 - **Tables:** when stdout is not a terminal, tables are printed as CSV.
@@ -111,8 +115,7 @@ gr branch list --pattern "feature/*" --author "Simon" --since 3w --sort date
 
 Bitbucket PRs are listed newest-created first. `--limit` counts matching PRs
 (default 30; zero or negative means unlimited), and pagination stops once enough
-matches are found. `--state all` includes open, merged, declined, and superseded
-PRs; `closed` includes the latter three.
+matches are found. `--state closed` lists declined and superseded PRs.
 
 PR authors can be specified by UUID, account ID, nickname, or full display name.
 Names use case-insensitive exact matching; branch authors use case-insensitive

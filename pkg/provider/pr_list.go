@@ -16,7 +16,7 @@ import (
 
 // ListOptions are filters for PR list queries.
 type ListOptions struct {
-	State    string // open|closed|merged|all
+	State    string // open (default), closed (without merging), merged or all
 	Author   string
 	Assignee string
 	Base     string
@@ -24,20 +24,33 @@ type ListOptions struct {
 	Limit    int
 }
 
-// PullRequest is a provider-agnostic PR representation for output.
+// PullRequest is a provider-agnostic PR representation for listings. State
+// and ProviderState are as in PRDetails.
 type PullRequest struct {
-	Number    int       `json:"number"`
-	Title     string    `json:"title"`
-	Author    string    `json:"author"`
-	State     string    `json:"state"`
-	CreatedAt time.Time `json:"created_at"`
-	URL       string    `json:"url"`
+	Number        int       `json:"number"`
+	Title         string    `json:"title"`
+	Author        string    `json:"author"`
+	State         string    `json:"state"`
+	ProviderState string    `json:"provider_state"`
+	Draft         bool      `json:"draft"`
+	Base          string    `json:"base"`
+	Head          string    `json:"head"`
+	CreatedAt     time.Time `json:"created_at"`
+	URL           string    `json:"url"`
 }
 
 // PrList lists pull/merge requests for a detected provider.
 func (p Provider) PrList(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRequest, error) {
 	if nfo == nil {
 		return nil, errors.New("missing repo info")
+	}
+	opts.State = strings.ToLower(strings.TrimSpace(opts.State))
+	switch opts.State {
+	case "":
+		opts.State = StateOpen
+	case StateOpen, StateClosed, StateMerged, "all":
+	default:
+		return nil, invalidArgf("invalid PR state %q (want open, closed, merged or all)", opts.State)
 	}
 	switch p {
 	case ProviderGitHub:
@@ -57,20 +70,10 @@ func prListGitHub(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 		return nil, err
 	}
 
-	state := strings.ToLower(strings.TrimSpace(opts.State))
-	mergedOnly := false
-	switch state {
-	case "", "open":
-		state = "open"
-	case "closed":
-		state = "closed"
-	case "all":
-		state = "all"
-	case "merged":
-		state = "closed"
-		mergedOnly = true
-	default:
-		state = "open"
+	// GitHub only knows open and closed; merged PRs are closed ones.
+	state := opts.State
+	if state == StateMerged {
+		state = StateClosed
 	}
 
 	perPage := 30
@@ -104,10 +107,8 @@ func prListGitHub(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 			return nil, err
 		}
 		for _, pr := range prs {
-			if mergedOnly {
-				if pr.MergedAt == nil || pr.MergedAt.IsZero() {
-					continue
-				}
+			if opts.State != "all" && githubState(pr) != opts.State {
+				continue
 			}
 			if opts.Author != "" {
 				if pr.User == nil || strings.ToLower(pr.User.GetLogin()) != strings.ToLower(opts.Author) {
@@ -150,24 +151,13 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 		return nil, err
 	}
 
-	state := strings.ToLower(strings.TrimSpace(opts.State))
-	// GitLab states: opened, closed, merged; omit for all
+	// GitLab states: opened, closed (without merging), locked, merged; omit for all
 	var glState *string
-	switch state {
-	case "open", "opened", "":
-		s := "opened"
-		glState = &s
-	case "closed":
-		s := "closed"
-		glState = &s
-	case "merged":
-		s := "merged"
-		glState = &s
-	case "all":
-		glState = nil
-	default:
-		s := "opened"
-		glState = &s
+	switch opts.State {
+	case StateOpen:
+		glState = new("opened")
+	case StateClosed, StateMerged:
+		glState = new(opts.State)
 	}
 
 	perPage := 20
@@ -243,16 +233,16 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 	}
 	params := url.Values{
 		"sort": {"-created_on"},
-		"fields": {"next,values.id,values.title,values.state,values.created_on," +
-			"values.author.nickname,values.author.display_name,values.links.html.href"},
+		"fields": {"next,values.id,values.title,values.state,values.draft,values.created_on," +
+			"values.author.nickname,values.author.display_name,values.links.html.href," +
+			"values.source.branch.name,values.destination.branch.name"},
 	}
-	// Omission means OPEN, not all. Use repeated state parameters rather than
-	// the SDK's States field, which overwrites all but the last state.
-	switch strings.ToLower(strings.TrimSpace(opts.State)) {
-	case "merged":
+	// Omission means OPEN, not all, so always pass (repeated) state parameters.
+	switch opts.State {
+	case StateMerged:
 		params["state"] = []string{"MERGED"}
-	case "closed":
-		params["state"] = []string{"MERGED", "DECLINED", "SUPERSEDED"}
+	case StateClosed:
+		params["state"] = []string{"DECLINED", "SUPERSEDED"}
 	case "all":
 		params["state"] = []string{"OPEN", "MERGED", "DECLINED", "SUPERSEDED"}
 	default:

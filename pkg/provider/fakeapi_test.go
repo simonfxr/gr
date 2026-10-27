@@ -10,6 +10,9 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
+
+	githublib "github.com/google/go-github/v74/github"
 )
 
 // fakeAPI is an in-process stand-in for a provider REST API. Tests register
@@ -157,6 +160,37 @@ func TestRejectedTokenIsAuthError(t *testing.T) {
 		_, err := info.Provider.PrView(t.Context(), info, 1)
 		if !IsAuthError(err) {
 			t.Errorf("%s: err = %v, want auth error", info.Provider, err)
+		}
+	}
+}
+
+func TestPRStateNormalization(t *testing.T) {
+	merged := githublib.Timestamp{Time: time.Now()}
+	for _, tc := range []struct{ got, want string }{
+		{githubState(&githublib.PullRequest{State: new("open")}), StateOpen},
+		{githubState(&githublib.PullRequest{State: new("closed")}), StateClosed},
+		{githubState(&githublib.PullRequest{State: new("closed"), MergedAt: &merged}), StateMerged},
+		{gitlabState("opened"), StateOpen},
+		{gitlabState("locked"), StateOpen},
+		{gitlabState("closed"), StateClosed},
+		{gitlabState("merged"), StateMerged},
+		{bitbucketState("OPEN"), StateOpen},
+		{bitbucketState("MERGED"), StateMerged},
+		{bitbucketState("DECLINED"), StateClosed},
+		{bitbucketState("SUPERSEDED"), StateClosed},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("got %s, want %s", tc.got, tc.want)
+		}
+	}
+}
+
+func TestPrListRejectsUnknownState(t *testing.T) {
+	for _, setup := range []func(*testing.T) (*fakeAPI, *Info){fakeGitHub, fakeGitLab, fakeBitbucketAPI} {
+		_, info := setup(t)
+		_, err := info.Provider.PrList(t.Context(), info, ListOptions{State: "declined"})
+		if _, ok := err.(*InvalidArgumentError); !ok {
+			t.Errorf("%s: err = %v, want invalid argument", info.Provider, err)
 		}
 	}
 }

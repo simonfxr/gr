@@ -83,7 +83,8 @@ func prList(ctx context.Context, info *provider.Info, cmd *PRListCmd) error {
 	headers := []string{"ID", "Title", "Author", "State", "Created"}
 	tables.Render(headers, func(yield func([]string) bool) {
 		for _, pr := range rows {
-			if !yield([]string{fmt.Sprintf("#%d", pr.Number), pr.Title, pr.Author, pr.State, formatTime(pr.CreatedAt)}) {
+			state := formatState(pr.State, pr.ProviderState, pr.Draft)
+			if !yield([]string{fmt.Sprintf("#%d", pr.Number), pr.Title, pr.Author, state, formatTime(pr.CreatedAt)}) {
 				return
 			}
 		}
@@ -105,14 +106,7 @@ func prView(ctx context.Context, info *provider.Info, cmd *PRViewCmd) error {
 	}
 	fmt.Printf("%s (#%d)\n", d.Title, d.Number)
 	fmt.Printf("Author:   %s\n", d.Author)
-	state := d.State
-	if d.Merged {
-		state = "merged"
-	}
-	fmt.Printf("State:    %s\n", state)
-	if d.Draft {
-		fmt.Printf("Draft:    %v\n", d.Draft)
-	}
+	fmt.Printf("State:    %s\n", formatState(d.State, d.ProviderState, d.Draft))
 	if d.Head != "" || d.Base != "" {
 		fmt.Printf("Branch:   %s -> %s\n", d.Head, d.Base)
 	}
@@ -201,11 +195,7 @@ func prClose(ctx context.Context, info *provider.Info, cmd *PRCloseCmd) error {
 			return err
 		}
 	} else {
-		state := "closed"
-		if res != nil && res.State != "" {
-			state = res.State
-		}
-		fmt.Printf("PR #%d %s.\n", number, state)
+		fmt.Printf("PR #%d %s.\n", number, formatState(res.State, res.ProviderState, false))
 		if deleted {
 			fmt.Printf("Deleted remote branch %q.\n", res.Head)
 		}
@@ -476,6 +466,21 @@ func parseFileLine(s string) (string, int, error) {
 		return "", 0, usageErrorf("invalid location %q: missing file", s)
 	}
 	return s[:i], line, nil
+}
+
+// formatState renders a normalized PR state, e.g. "closed (declined)" or
+// "open, draft".
+func formatState(state, providerState string, draft bool) string {
+	// Only mention provider states that add information.
+	switch providerState {
+	case "", "open", "opened", "closed", "merged":
+	default:
+		state += " (" + providerState + ")"
+	}
+	if draft {
+		state += ", draft"
+	}
+	return state
 }
 
 // formatLocation renders "path:line", "path" or "".

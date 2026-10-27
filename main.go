@@ -45,7 +45,7 @@ type PRCmd struct {
 // Without either, the open PR of the current branch is used.
 
 type PRListCmd struct {
-	State    string `arg:"--state" help:"filter by state: open, closed, merged, all" default:"open"`
+	State    string `arg:"--state" help:"filter by state: open, closed (without merging), merged, all" default:"open"`
 	Author   string `arg:"--author" help:"filter by author username"`
 	Assignee string `arg:"--assignee" help:"filter by assignee username"`
 	Base     string `arg:"--base" help:"filter by base branch"`

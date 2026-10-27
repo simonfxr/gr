@@ -181,3 +181,19 @@ func TestGitLabPrCommentsPaginates(t *testing.T) {
 		t.Errorf("comments = %+v", comments)
 	}
 }
+
+func TestGitLabPrListStates(t *testing.T) {
+	for state, apiState := range map[string]string{"open": "opened", "closed": "closed", "merged": "merged", "all": ""} {
+		f, info := fakeGitLab(t)
+		f.handle("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("state"); got != apiState {
+				t.Errorf("%s: API state = %q, want %q", state, got, apiState)
+			}
+			writeJSON(w, http.StatusOK, `[{"iid":1,"state":"locked"}]`)
+		})
+		prs, err := ProviderGitLab.PrList(t.Context(), info, ListOptions{State: state})
+		if err != nil || len(prs) != 1 || prs[0].State != "open" || prs[0].ProviderState != "locked" {
+			t.Errorf("%s: got %+v, %v", state, prs, err)
+		}
+	}
+}

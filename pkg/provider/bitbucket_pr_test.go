@@ -86,7 +86,7 @@ func TestBitbucketPrMergeAndClose(t *testing.T) {
 	f.reply("POST /repositories/workspace/repo/pullrequests/8/decline", http.StatusOK,
 		strings.Replace(strings.Replace(bitbucketPR7, `"OPEN"`, `"DECLINED"`, 1), `"id":7`, `"id":8`, 1))
 	d, err = ProviderBitbucket.PrClose(t.Context(), info, 8)
-	if err != nil || d.Number != 8 || d.State != "declined" {
+	if err != nil || d.Number != 8 || d.State != "closed" || d.ProviderState != "declined" {
 		t.Errorf("close = %+v, %v", d, err)
 	}
 }
