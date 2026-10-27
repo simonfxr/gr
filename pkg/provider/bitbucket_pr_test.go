@@ -145,8 +145,21 @@ func TestBitbucketBranchDelete(t *testing.T) {
 	}
 }
 
+func TestBitbucketBranchRenameRefusesMainBranch(t *testing.T) {
+	f, info := fakeBitbucketAPI(t)
+	f.reply("GET /repositories/workspace/repo", http.StatusOK, `{"mainbranch":{"name":"old"}}`)
+	err := ProviderBitbucket.BranchRename(t.Context(), info, "old", "new", BranchRenameOptions{})
+	if !isInvalidArg(err) || !strings.Contains(err.Error(), "main branch") {
+		t.Errorf("err = %v", err)
+	}
+	if f.called("POST /repositories/workspace/repo/refs/branches") {
+		t.Error("branch created despite refusal")
+	}
+}
+
 func TestBitbucketBranchRenameRetargetsPRs(t *testing.T) {
 	f, info := fakeBitbucketAPI(t)
+	f.reply("GET /repositories/workspace/repo", http.StatusOK, `{"mainbranch":{"name":"main"}}`)
 	f.reply("GET /repositories/workspace/repo/refs/branches/old", http.StatusOK, `{"target":{"hash":"abc123"}}`)
 	f.handle("POST /repositories/workspace/repo/refs/branches", func(w http.ResponseWriter, r *http.Request) {
 		if got := decodeJSON(t, r); !reflect.DeepEqual(got, map[string]any{"name": "new", "target": map[string]any{"hash": "abc123"}}) {
@@ -159,11 +172,14 @@ func TestBitbucketBranchRenameRetargetsPRs(t *testing.T) {
 		case `destination.branch.name = "old"`:
 			writeJSON(w, http.StatusOK, `{"values":[{"id":1}]}`)
 		case `source.branch.name = "old"`:
-			writeJSON(w, http.StatusOK, `{"values":[]}`)
+			writeJSON(w, http.StatusOK, `{"values":[{"id":2}]}`)
 		default:
 			t.Errorf("q = %q", q)
 		}
 	})
+	// PR 2 comes from a same-named branch of a fork: left alone.
+	f.reply("GET /repositories/workspace/repo/pullrequests/2", http.StatusOK, `{"id":2,"title":"F",
+		"source":{"branch":{"name":"old"},"repository":{"full_name":"alice/fork"}},"destination":{"branch":{"name":"main"}}}`)
 	f.reply("GET /repositories/workspace/repo/pullrequests/1", http.StatusOK, `{"id":1,"title":"T","description":"D",
 		"draft":true,"close_source_branch":true,"reviewers":[{"uuid":"{r1}"}],
 		"source":{"branch":{"name":"feature"},"repository":{"full_name":"workspace/repo"}},

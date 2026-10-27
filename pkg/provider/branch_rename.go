@@ -98,6 +98,13 @@ func branchRenameBitbucket(ctx context.Context, nfo *Info, oldName, newName stri
 	if err != nil {
 		return err
 	}
+	def, err := DefaultBranchBitbucket(ctx, bb, nfo)
+	if err != nil {
+		return err
+	}
+	if def == oldName {
+		return invalidArgf("%q is the main branch of %s/%s; change the main branch first", oldName, nfo.Owner, nfo.Repo)
+	}
 
 	// Find hash for old branch
 	var branch struct {
@@ -119,13 +126,20 @@ func branchRenameBitbucket(ctx context.Context, nfo *Info, oldName, newName stri
 
 	// Retarget destination branch on open PRs and also source branch where applicable.
 	if !opts.NoUpdatePRs {
-		if err := bitbucketRetargetPRs(ctx, bb, nfo, "destination.branch.name = "+bitbucketQueryString(oldName), func(pr *bitbucketPR) {
+		if err := bitbucketRetargetPRs(ctx, bb, nfo, "destination.branch.name = "+bitbucketQueryString(oldName), func(pr *bitbucketPR) bool {
 			pr.Destination.Branch.Name = newName
+			return true
 		}); err != nil {
 			return err
 		}
-		if err := bitbucketRetargetPRs(ctx, bb, nfo, "source.branch.name = "+bitbucketQueryString(oldName), func(pr *bitbucketPR) {
+		fullName := nfo.Owner + "/" + nfo.Repo
+		if err := bitbucketRetargetPRs(ctx, bb, nfo, "source.branch.name = "+bitbucketQueryString(oldName), func(pr *bitbucketPR) bool {
+			// PRs from forks come from a same-named branch of the fork.
+			if src := pr.Source.Repository.FullName; src != "" && !strings.EqualFold(src, fullName) {
+				return false
+			}
 			pr.Source.Branch.Name = newName
+			return true
 		}); err != nil {
 			return err
 		}
@@ -136,9 +150,10 @@ func branchRenameBitbucket(ctx context.Context, nfo *Info, oldName, newName stri
 }
 
 // bitbucketRetargetPRs updates the open PRs matching a query after applying
-// mutate to their branches. The update repeats the PR's title, description,
-// reviewers and flags so that they are preserved.
-func bitbucketRetargetPRs(ctx context.Context, bb *bitbucketAPIClient, nfo *Info, query string, mutate func(*bitbucketPR)) error {
+// mutate to their branches; PRs for which mutate returns false are skipped.
+// The update repeats the PR's title, description, reviewers and flags so
+// that they are preserved.
+func bitbucketRetargetPRs(ctx context.Context, bb *bitbucketAPIClient, nfo *Info, query string, mutate func(*bitbucketPR) bool) error {
 	prs, err := bitbucketOpenPRs(ctx, bb, nfo, query)
 	if err != nil {
 		return err
@@ -148,7 +163,9 @@ func bitbucketRetargetPRs(ctx context.Context, bb *bitbucketAPIClient, nfo *Info
 		if err != nil {
 			return err
 		}
-		mutate(pr)
+		if !mutate(pr) {
+			continue
+		}
 		reviewers := []map[string]string{}
 		for _, r := range pr.Reviewers {
 			if r.UUID != "" {
