@@ -53,6 +53,7 @@ type PRListCmd struct {
 type PRCreateCmd struct {
 	Title              string `arg:"--title" help:"PR title"`
 	Body               string `arg:"--body" help:"PR description/body"`
+	BodyFile           string `arg:"--body-file" help:"read the PR description from FILE ('-' for stdin)"`
 	Base               string `arg:"--base" help:"target branch (default: repo default)"`
 	Head               string `arg:"--head" help:"source branch (default: current)"`
 	Draft              bool   `arg:"--draft" help:"create as draft PR"`
@@ -102,20 +103,22 @@ type PRCommentsCmd struct {
 type PRAddCommentCmd struct {
 	PRSelector
 	Location string `arg:"positional,required" help:"file:line location for the inline comment"`
-	Body     string `arg:"positional,required" help:"comment text"`
+	Body     string `arg:"positional" help:"comment text (or use --body-file)"`
+	BodyFile string `arg:"--body-file" help:"read the comment text from FILE ('-' for stdin)"`
 	JSON     bool   `arg:"--json" help:"output as JSON"`
 }
 
 type PRAddCommentsCmd struct {
 	PRSelector
-	FromJSON string `arg:"--from-json,required" help:"path to JSON file with comments array [{path, line, body}, ...]"`
+	FromJSON string `arg:"--from-json,required" help:"JSON file ('-' for stdin) with comments array [{path, line, body}, ...]"`
 	JSON     bool   `arg:"--json" help:"output per-comment results as JSON"`
 }
 
 type PRReplyCmd struct {
 	PRSelector
 	CommentID int    `arg:"positional,required" help:"comment ID to reply to"`
-	Body      string `arg:"positional,required" help:"reply text"`
+	Body      string `arg:"positional" help:"reply text (or use --body-file)"`
+	BodyFile  string `arg:"--body-file" help:"read the reply text from FILE ('-' for stdin)"`
 	JSON      bool   `arg:"--json" help:"output as JSON"`
 }
 
@@ -135,7 +138,8 @@ type PRAddTaskCmd struct {
 	PRSelector
 	CommentID int    `arg:"--comment,-c" help:"attach the task to this comment ID"`
 	Pending   bool   `arg:"--pending" help:"create as pending (part of your unsubmitted review)"`
-	Body      string `arg:"positional,required" help:"task text"`
+	Body      string `arg:"positional" help:"task text (or use --body-file)"`
+	BodyFile  string `arg:"--body-file" help:"read the task text from FILE ('-' for stdin)"`
 	JSON      bool   `arg:"--json" help:"output as JSON"`
 }
 

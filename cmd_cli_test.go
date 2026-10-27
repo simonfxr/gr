@@ -184,6 +184,30 @@ func TestWantsJSON(t *testing.T) {
 	}
 }
 
+func TestResolveBody(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(file, []byte("    indented `code`\nline 2\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := resolveBody("inline", "", "x"); err != nil || got != "inline" {
+		t.Errorf("inline: %q, %v", got, err)
+	}
+	if got, err := resolveBody("", file, "x"); err != nil || got != "    indented `code`\nline 2" {
+		t.Errorf("file: %q, %v", got, err)
+	}
+	old := stdin
+	t.Cleanup(func() { stdin = old })
+	stdin = strings.NewReader("from stdin\n")
+	if got, err := resolveBody("", "-", "x"); err != nil || got != "from stdin" {
+		t.Errorf("stdin: %q, %v", got, err)
+	}
+	for _, tc := range [][2]string{{"a", file}, {"", ""}, {"  ", ""}} {
+		if _, err := resolveBody(tc[0], tc[1], "x"); errorKind(err) != kindUsage {
+			t.Errorf("resolveBody(%q, %q) = %v; want usage error", tc[0], tc[1], err)
+		}
+	}
+}
+
 func TestAddCommentsReportsPerItemResults(t *testing.T) {
 	fakeBitbucket(t, func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
@@ -200,14 +224,13 @@ func TestAddCommentsReportsPerItemResults(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(w, `{"id":%d,"content":{"raw":"ok"},"inline":{"path":%q,"to":%d}}`, 100+payload.Inline.To, payload.Inline.Path, payload.Inline.To)
 	})
-	input := filepath.Join(t.TempDir(), "comments.json")
-	if err := os.WriteFile(input, []byte(`[{"path":"a.go","line":1,"body":"x"},{"path":"bad.go","line":2,"body":"y"}]`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	old := stdin
+	t.Cleanup(func() { stdin = old })
+	stdin = strings.NewReader(`[{"path":"a.go","line":1,"body":"x"},{"path":"bad.go","line":2,"body":"y"}]`)
 
 	var err error
 	out := captureStdout(t, func() {
-		err = runPR(&PRCmd{AddComments: &PRAddCommentsCmd{PRSelector: PRSelector{Number: "3"}, FromJSON: input, JSON: true}}, bitbucketInfo)
+		err = runPR(&PRCmd{AddComments: &PRAddCommentsCmd{PRSelector: PRSelector{Number: "3"}, FromJSON: "-", JSON: true}}, bitbucketInfo)
 	})
 	if err == nil || exitCode(err) != exitError {
 		t.Errorf("expected failure exit, got %v", err)

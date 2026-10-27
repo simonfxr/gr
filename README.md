@@ -20,7 +20,7 @@ gr pr browse [PR]       # Open PR in browser
 
 gr pr comments          # List review comments
 gr pr addcomment <file:line> <text>
-gr pr addcomments --from-json <file>
+gr pr addcomments --from-json <file|->
 gr pr reply <comment-id> <text>
 gr pr resolve <comment-id>
 
@@ -45,6 +45,20 @@ Every command that operates on a single PR accepts:
 
 `view`, `browse`, `merge`, `close` and `checkout` also take the PR as a
 positional argument (`gr pr view 42`).
+
+### Text input
+
+`addcomment`, `reply` and `addtask` take their text as an argument or via
+`--body-file FILE` (`-` reads stdin), as does `pr create` for the description.
+This avoids shell quoting for multi-line Markdown and code:
+
+```bash
+gr pr reply 1234 --body-file - <<'MSG'
+Fixed, now uses `defineProps<{ foo?: string }>()`.
+MSG
+```
+
+`addcomments --from-json -` reads the comment array from stdin.
 
 ### Scripting and agents
 

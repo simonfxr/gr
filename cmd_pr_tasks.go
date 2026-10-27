@@ -43,12 +43,16 @@ func prTasks(ctx context.Context, info *provider.Info, cmd *PRTasksCmd) error {
 }
 
 func prAddTask(ctx context.Context, info *provider.Info, cmd *PRAddTaskCmd) error {
+	body, err := resolveBody(cmd.Body, cmd.BodyFile, "task text")
+	if err != nil {
+		return err
+	}
 	number, err := resolvePR(ctx, info, "", cmd.PRSelector)
 	if err != nil {
 		return err
 	}
 	task, err := info.Provider.PrAddTask(ctx, info, number, provider.AddTaskOptions{
-		Body:      cmd.Body,
+		Body:      body,
 		CommentID: cmd.CommentID,
 		Pending:   cmd.Pending,
 	})

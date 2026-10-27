@@ -251,11 +251,15 @@ func prAddComment(ctx context.Context, info *provider.Info, cmd *PRAddCommentCmd
 	if err != nil {
 		return err
 	}
+	body, err := resolveBody(cmd.Body, cmd.BodyFile, "comment text")
+	if err != nil {
+		return err
+	}
 	number, err := resolvePR(ctx, info, "", cmd.PRSelector)
 	if err != nil {
 		return err
 	}
-	comment, err := info.Provider.PrAddComment(ctx, info, number, provider.AddCommentOptions{Path: filePath, Line: line, Body: cmd.Body})
+	comment, err := info.Provider.PrAddComment(ctx, info, number, provider.AddCommentOptions{Path: filePath, Line: line, Body: body})
 	if err != nil {
 		return err
 	}
@@ -276,7 +280,7 @@ type addCommentResult struct {
 }
 
 func prAddComments(ctx context.Context, info *provider.Info, cmd *PRAddCommentsCmd) error {
-	data, err := os.ReadFile(cmd.FromJSON)
+	data, err := readInput(cmd.FromJSON)
 	if err != nil {
 		return fmt.Errorf("reading comments: %w", err)
 	}
@@ -322,11 +326,15 @@ func prAddComments(ctx context.Context, info *provider.Info, cmd *PRAddCommentsC
 }
 
 func prReply(ctx context.Context, info *provider.Info, cmd *PRReplyCmd) error {
+	body, err := resolveBody(cmd.Body, cmd.BodyFile, "reply text")
+	if err != nil {
+		return err
+	}
 	number, err := resolvePR(ctx, info, "", cmd.PRSelector)
 	if err != nil {
 		return err
 	}
-	reply, err := info.Provider.PrReplyComment(ctx, info, number, cmd.CommentID, cmd.Body)
+	reply, err := info.Provider.PrReplyComment(ctx, info, number, cmd.CommentID, body)
 	if err != nil {
 		return err
 	}
@@ -356,6 +364,16 @@ func prResolve(ctx context.Context, info *provider.Info, cmd *PRResolveCmd) erro
 func prCreate(ctx context.Context, info *provider.Info, create *PRCreateCmd) error {
 	title := strings.TrimSpace(create.Title)
 	body := create.Body
+	if create.BodyFile != "" {
+		if body != "" {
+			return usageErrorf("pass the PR description either via --body or --body-file, not both")
+		}
+		b, err := readInput(create.BodyFile)
+		if err != nil {
+			return err
+		}
+		body = strings.TrimRight(string(b), " \t\r\n")
+	}
 	editMsgPath := ""
 	if title == "" {
 		if t, err := provider.LastCommitTitle(info); err == nil && strings.TrimSpace(t) != "" {
