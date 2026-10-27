@@ -4,11 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
-	"slices"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -276,63 +272,4 @@ func LocalBranchDelete(repo *git.Repository, name string, force bool) error {
 		return err
 	}
 	return nil
-}
-
-func ParallelMap[T, U any](iter iter.Seq[T], f func(T) (U, error)) ([]U, error) {
-	const npar = 32
-	work := make(chan T)
-	go func() {
-		defer close(work)
-		for x := range iter {
-			work <- x
-		}
-	}()
-
-	type result struct {
-		u   U
-		err error
-	}
-	wg := sync.WaitGroup{}
-	results := make(chan result)
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	firstErr := atomic.Pointer[error]{}
-
-	for range npar {
-		wg.Go(func() {
-			for x := range work {
-				if firstErr.Load() != nil {
-					continue
-				}
-				u, err := f(x)
-				results <- result{u, err}
-			}
-		})
-	}
-
-	us := []U(nil)
-	for res := range results {
-		if firstErr.Load() != nil {
-			continue
-		}
-		if err := res.err; err != nil {
-			firstErr.Store(&err)
-			continue
-		}
-		us = append(us, res.u)
-	}
-
-	if err := firstErr.Load(); err != nil {
-		return nil, *err
-	}
-
-	return us, nil
-}
-
-func ParallelMapValues[T, U any](elems []T, f func(T) (U, error)) ([]U, error) {
-	return ParallelMap(slices.Values(elems), f)
 }

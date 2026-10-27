@@ -310,3 +310,30 @@ func TestGitHubPrResolve(t *testing.T) {
 		t.Errorf("conversation comment: err = %v", err)
 	}
 }
+
+func TestGitHubBranchList(t *testing.T) {
+	f, info := fakeGitHub(t)
+	f.handle("POST /api/graphql", func(w http.ResponseWriter, r *http.Request) {
+		vars, _ := decodeJSON(t, r)["variables"].(map[string]any)
+		if vars["cursor"] == "c1" {
+			writeJSON(w, http.StatusOK, `{"data":{"repository":{"refs":{"pageInfo":{"hasNextPage":false},
+				"nodes":[{"name":"feature/b","target":{"author":{"name":"Bob","date":"2026-10-03T10:00:00Z"}}}]}}}}`)
+			return
+		}
+		writeJSON(w, http.StatusOK, `{"data":{"repository":{"refs":{"pageInfo":{"hasNextPage":true,"endCursor":"c1"},
+			"nodes":[{"name":"main","target":{"author":{"name":"Alice","date":"2026-10-01T10:00:00Z"}}},
+				{"name":"tag-like","target":{}}]}}}}`)
+	})
+	branches, err := ProviderGitHub.BranchListRemote(t.Context(), info, BranchListOptions{Sort: "date"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []BranchInfo{
+		{Name: "feature/b", Author: "Bob", CommitDate: time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)},
+		{Name: "main", Author: "Alice", CommitDate: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)},
+		{Name: "tag-like"},
+	}
+	if !reflect.DeepEqual(branches, want) {
+		t.Errorf("branches = %+v", branches)
+	}
+}

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	githublib "github.com/google/go-github/v74/github"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -45,62 +44,61 @@ func (p Provider) BranchListRemote(ctx context.Context, nfo *Info, opts BranchLi
 	}
 }
 
+// branchListRemoteGitHub lists branches with their head commit in one
+// GraphQL request per 100 branches (REST needs one request per branch).
 func branchListRemoteGitHub(ctx context.Context, nfo *Info, opts BranchListOptions) ([]BranchInfo, error) {
 	gh, err := githubClient(ctx, nfo)
 	if err != nil {
 		return nil, err
 	}
-	listOpts := &githublib.BranchListOptions{PerPage: 100, Page: 1}
-	type stub struct {
-		name string
-		sha  string
-	}
-	var stubs []stub
+	const query = `query($owner: String!, $repo: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    refs(refPrefix: "refs/heads/", first: 100, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { name target { ... on Commit { author { name date } } } }
+    }
+  }
+}`
+	vars := map[string]any{"owner": nfo.Owner, "repo": nfo.Repo, "cursor": nil}
+	var out []BranchInfo
 	for {
-		branches, resp, err := gh.Repositories.ListBranches(ctx, nfo.Owner, nfo.Repo, listOpts)
-		if err != nil {
+		var res struct {
+			Repository *struct {
+				Refs struct {
+					PageInfo struct {
+						HasNextPage bool
+						EndCursor   string
+					}
+					Nodes []struct {
+						Name   string
+						Target struct {
+							Author *struct {
+								Name string
+								Date time.Time
+							}
+						}
+					}
+				}
+			}
+		}
+		if err := githubGraphQL(ctx, gh, query, vars, &res); err != nil {
 			return nil, err
 		}
-		for _, b := range branches {
-			name := b.GetName()
-			s := stub{name: name}
-			if b.Commit != nil {
-				s.sha = b.Commit.GetSHA()
+		if res.Repository == nil {
+			return nil, notFoundf("repository %s/%s not found", nfo.Owner, nfo.Repo)
+		}
+		for _, n := range res.Repository.Refs.Nodes {
+			b := BranchInfo{Name: n.Name}
+			if a := n.Target.Author; a != nil {
+				b.Author, b.CommitDate = a.Name, a.Date
 			}
-			stubs = append(stubs, s)
+			out = append(out, b)
 		}
-		if resp.NextPage == 0 {
-			break
+		if !res.Repository.Refs.PageInfo.HasNextPage {
+			return sortBranches(out, opts), nil
 		}
-		listOpts.ListOptions.Page = resp.NextPage
+		vars["cursor"] = res.Repository.Refs.PageInfo.EndCursor
 	}
-	// If a pattern is provided, pre-filter to avoid unnecessary API calls.
-	if p := strings.TrimSpace(opts.Pattern); p != "" {
-		filtered := make([]stub, 0, len(stubs))
-		for _, s := range stubs {
-			if ok, _ := path.Match(p, s.name); ok {
-				filtered = append(filtered, s)
-			}
-		}
-		stubs = filtered
-	}
-
-	// Fetch commit info in parallel; ignore individual errors to keep listing responsive.
-	infos, _ := ParallelMapValues(stubs, func(s stub) (BranchInfo, error) {
-		info := BranchInfo{Name: s.name}
-		if s.sha == "" {
-			return info, nil
-		}
-		if gc, _, err := gh.Git.GetCommit(ctx, nfo.Owner, nfo.Repo, s.sha); err == nil && gc != nil && gc.Author != nil {
-			if gc.Author.Date != nil {
-				info.CommitDate = gc.Author.Date.Time
-			}
-			info.Author = gc.Author.GetName()
-		}
-		return info, nil
-	})
-
-	return sortBranches(infos, opts), nil
 }
 
 func branchListRemoteGitLab(ctx context.Context, nfo *Info, opts BranchListOptions) ([]BranchInfo, error) {
