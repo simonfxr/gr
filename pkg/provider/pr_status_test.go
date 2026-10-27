@@ -91,7 +91,7 @@ func TestGitHubMergeStatus(t *testing.T) {
 		{"blocked", new(false), []string{BlockerBlocked}}, // no other reason known
 		{"unknown", nil, []string{}},
 	} {
-		st := &PRStatus{PRDetails: PRDetails{State: StateOpen}}
+		st := &PRStatus{State: StateOpen}
 		st.Merge = githubMergeStatus(&githublib.PullRequest{MergeableState: new(tc.state)})
 		st.addBlockers()
 		if !reflect.DeepEqual(st.Merge.Mergeable, tc.mergeable) || !reflect.DeepEqual(st.Merge.Blockers, tc.blockers) {
@@ -201,7 +201,7 @@ func TestBitbucketPrStatus(t *testing.T) {
 }
 
 func TestPrStatusOfMergedPR(t *testing.T) {
-	st := &PRStatus{PRDetails: PRDetails{State: StateMerged}, Comments: &CommentCounts{Unresolved: 2}}
+	st := &PRStatus{State: StateMerged, Comments: &CommentCounts{Unresolved: 2}}
 	st.addBlockers()
 	if !reflect.DeepEqual(st.Merge.Blockers, []string{BlockerNotOpen}) {
 		t.Errorf("blockers = %v", st.Merge.Blockers)

@@ -219,7 +219,7 @@ func gitlabMRsFromBranch(gl *gitlab.Client, path string, proj *gitlab.Project, b
 // and/or target branch (nil: any).
 func gitlabOpenMRs(gl *gitlab.Client, project any, sourceBranch, targetBranch *string) ([]*gitlab.BasicMergeRequest, error) {
 	opts := &gitlab.ListProjectMergeRequestsOptions{
-		ListOptions:  gitlab.ListOptions{PerPage: 100, Page: 1},
+		PerPage: 100, Page: 1,
 		State:        new("opened"),
 		SourceBranch: sourceBranch,
 		TargetBranch: targetBranch,

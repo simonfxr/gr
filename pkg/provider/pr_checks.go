@@ -153,7 +153,7 @@ func githubChecks(ctx context.Context, gh *githublib.Client, nfo *Info, number i
 
 func githubCheckRuns(ctx context.Context, gh *githublib.Client, nfo *Info, sha string) ([]Check, error) {
 	out := []Check{}
-	opts := &githublib.ListCheckRunsOptions{Filter: new("latest"), ListOptions: githublib.ListOptions{PerPage: 100}}
+	opts := &githublib.ListCheckRunsOptions{Filter: new("latest"), PerPage: 100}
 	for {
 		res, resp, err := gh.Checks.ListCheckRunsForRef(ctx, nfo.Owner, nfo.Repo, sha, opts)
 		if err != nil {
@@ -242,7 +242,7 @@ func gitlabChecks(gl *gitlab.Client, nfo *Info, number int, mr *gitlab.MergeRequ
 	if p.ProjectID != 0 {
 		project = p.ProjectID
 	}
-	opts := &gitlab.ListJobsOptions{ListOptions: gitlab.ListOptions{PerPage: 100}}
+	opts := &gitlab.ListJobsOptions{PerPage: 100}
 	for {
 		jobs, resp, err := gl.Jobs.ListPipelineJobs(project, p.ID, opts)
 		if err != nil {
