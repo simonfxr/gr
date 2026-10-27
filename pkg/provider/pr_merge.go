@@ -72,7 +72,7 @@ func prMergeGitLab(ctx context.Context, nfo *Info, number int, opts MergeOptions
 	if err != nil {
 		return nil, err
 	}
-	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
+	project := gitlabProject(nfo)
 	squash := false
 	if strings.EqualFold(strings.TrimSpace(opts.Method), "squash") {
 		squash = true

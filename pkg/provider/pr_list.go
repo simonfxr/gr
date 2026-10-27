@@ -131,18 +131,7 @@ func prListGitHub(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 					continue
 				}
 			}
-			created := time.Time{}
-			if pr.CreatedAt != nil {
-				created = pr.CreatedAt.Time
-			}
-			results = append(results, PullRequest{
-				Number:    pr.GetNumber(),
-				Title:     pr.GetTitle(),
-				Author:    pr.GetUser().GetLogin(),
-				State:     pr.GetState(),
-				CreatedAt: created,
-				URL:       pr.GetHTMLURL(),
-			})
+			results = append(results, githubPRDetails(pr).Summary())
 			if opts.Limit > 0 && len(results) >= opts.Limit {
 				return results, nil
 			}
@@ -204,7 +193,7 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 		listOpts.SourceBranch = new(opts.Head)
 	}
 
-	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
+	project := gitlabProject(nfo)
 	var results []PullRequest
 	for {
 		mrs, resp, err := gl.MergeRequests.ListProjectMergeRequests(project, listOpts)
@@ -212,10 +201,6 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 			return nil, err
 		}
 		for _, mr := range mrs {
-			author := ""
-			if mr.Author != nil {
-				author = mr.Author.Username
-			}
 			if opts.Assignee != "" {
 				// Client-side filter by assignee username (Assignee or Assignees)
 				ok := false
@@ -234,18 +219,7 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 					continue
 				}
 			}
-			created := time.Time{}
-			if mr.CreatedAt != nil {
-				created = *mr.CreatedAt
-			}
-			results = append(results, PullRequest{
-				Number:    int(mr.IID),
-				Title:     mr.Title,
-				Author:    author,
-				State:     mr.State,
-				CreatedAt: created,
-				URL:       mr.WebURL,
-			})
+			results = append(results, gitlabPRDetails(mr).Summary())
 			if opts.Limit > 0 && len(results) >= opts.Limit {
 				return results, nil
 			}

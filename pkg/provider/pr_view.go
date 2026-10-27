@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	githublib "github.com/google/go-github/v74/github"
 	bitbucket "github.com/ktrysmt/go-bitbucket"
+	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
 // PRDetails is a provider-agnostic view of a single PR/MR.
@@ -48,46 +50,11 @@ func prViewGitHub(ctx context.Context, nfo *Info, number int) (*PRDetails, error
 	if err != nil {
 		return nil, err
 	}
-
 	pr, _, err := gh.PullRequests.Get(ctx, nfo.Owner, nfo.Repo, number)
 	if err != nil {
 		return nil, err
 	}
-	var created, updated time.Time
-	if pr.CreatedAt != nil {
-		created = pr.CreatedAt.Time
-	}
-	if pr.UpdatedAt != nil {
-		updated = pr.UpdatedAt.Time
-	}
-	author := ""
-	if pr.User != nil {
-		author = pr.User.GetLogin()
-	}
-	base := ""
-	if pr.Base != nil {
-		base = pr.Base.GetRef()
-	}
-	head := ""
-	if pr.Head != nil {
-		head = pr.Head.GetRef()
-	}
-	merged := pr.MergedAt != nil && !pr.MergedAt.IsZero()
-	details := &PRDetails{
-		Number:    pr.GetNumber(),
-		Title:     pr.GetTitle(),
-		Body:      pr.GetBody(),
-		Author:    author,
-		State:     pr.GetState(),
-		CreatedAt: created,
-		UpdatedAt: updated,
-		Merged:    merged,
-		Draft:     pr.GetDraft(),
-		Base:      base,
-		Head:      head,
-		URL:       pr.GetHTMLURL(),
-	}
-	return details, nil
+	return githubPRDetails(pr), nil
 }
 
 func prViewGitLab(ctx context.Context, nfo *Info, number int) (*PRDetails, error) {
@@ -95,41 +62,64 @@ func prViewGitLab(ctx context.Context, nfo *Info, number int) (*PRDetails, error
 	if err != nil {
 		return nil, err
 	}
-
-	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
-	mr, _, err := gl.MergeRequests.GetMergeRequest(project, int64(number), nil)
+	mr, _, err := gl.MergeRequests.GetMergeRequest(gitlabProject(nfo), int64(number), nil)
 	if err != nil {
 		return nil, err
 	}
+	return gitlabPRDetails(&mr.BasicMergeRequest), nil
+}
 
-	var created, updated time.Time
+// githubPRDetails converts a GitHub pull request; getters are nil-safe.
+func githubPRDetails(pr *githublib.PullRequest) *PRDetails {
+	return &PRDetails{
+		Number:    pr.GetNumber(),
+		Title:     pr.GetTitle(),
+		Body:      pr.GetBody(),
+		Author:    pr.GetUser().GetLogin(),
+		State:     pr.GetState(),
+		CreatedAt: pr.GetCreatedAt().Time,
+		UpdatedAt: pr.GetUpdatedAt().Time,
+		Merged:    !pr.GetMergedAt().IsZero(),
+		Draft:     pr.GetDraft(),
+		Base:      pr.GetBase().GetRef(),
+		Head:      pr.GetHead().GetRef(),
+		URL:       pr.GetHTMLURL(),
+	}
+}
+
+// gitlabPRDetails converts a GitLab merge request.
+func gitlabPRDetails(mr *gitlab.BasicMergeRequest) *PRDetails {
+	d := &PRDetails{
+		Number: int(mr.IID),
+		Title:  mr.Title,
+		Body:   mr.Description,
+		State:  mr.State,
+		Merged: mr.MergedAt != nil && !mr.MergedAt.IsZero(),
+		Draft:  false, // GitLab draft/WIP not standardized in this client; omit
+		Base:   mr.TargetBranch,
+		Head:   mr.SourceBranch,
+		URL:    mr.WebURL,
+	}
+	if mr.Author != nil {
+		d.Author = mr.Author.Username
+	}
 	if mr.CreatedAt != nil {
-		created = *mr.CreatedAt
+		d.CreatedAt = *mr.CreatedAt
 	}
 	if mr.UpdatedAt != nil {
-		updated = *mr.UpdatedAt
+		d.UpdatedAt = *mr.UpdatedAt
 	}
-	author := ""
-	if mr.Author != nil {
-		author = mr.Author.Username
-	}
-	merged := mr.MergedAt != nil && !mr.MergedAt.IsZero()
+	return d
+}
 
-	details := &PRDetails{
-		Number:    int(mr.IID),
-		Title:     mr.Title,
-		Body:      mr.Description,
-		Author:    author,
-		State:     mr.State,
-		CreatedAt: created,
-		UpdatedAt: updated,
-		Merged:    merged,
-		Draft:     false, // GitLab draft/WIP not standardized in this client; omit
-		Base:      mr.TargetBranch,
-		Head:      mr.SourceBranch,
-		URL:       mr.WebURL,
-	}
-	return details, nil
+// gitlabProject is the project path ("group/sub/repo") used as GitLab project ID.
+func gitlabProject(nfo *Info) string {
+	return nfo.Owner + "/" + nfo.Repo
+}
+
+// Summary returns the list representation of a PR.
+func (d *PRDetails) Summary() PullRequest {
+	return PullRequest{Number: d.Number, Title: d.Title, Author: d.Author, State: d.State, CreatedAt: d.CreatedAt, URL: d.URL}
 }
 
 func prViewBitbucket(ctx context.Context, nfo *Info, number int) (*PRDetails, error) {

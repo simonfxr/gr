@@ -47,7 +47,7 @@ func branchRenameGitLab(ctx context.Context, nfo *Info, oldName, newName string,
 	if err != nil {
 		return err
 	}
-	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
+	project := gitlabProject(nfo)
 
 	if opts.NoUpdatePRs {
 		// Block if any open MRs use oldName as source branch.

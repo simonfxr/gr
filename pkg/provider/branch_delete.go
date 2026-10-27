@@ -90,7 +90,7 @@ func branchDeleteGitLab(ctx context.Context, nfo *Info, name string) error {
 	if err != nil {
 		return err
 	}
-	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
+	project := gitlabProject(nfo)
 	_, err = gl.Branches.DeleteBranch(project, name)
 	return err
 }

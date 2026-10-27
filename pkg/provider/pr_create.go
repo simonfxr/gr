@@ -90,40 +90,7 @@ func prCreateGitHub(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	if err != nil {
 		return nil, err
 	}
-	var created, updated time.Time
-	if pr.CreatedAt != nil {
-		created = pr.CreatedAt.Time
-	}
-	if pr.UpdatedAt != nil {
-		updated = pr.UpdatedAt.Time
-	}
-	author := ""
-	if pr.User != nil {
-		author = pr.User.GetLogin()
-	}
-	b := ""
-	if pr.Base != nil {
-		b = pr.Base.GetRef()
-	}
-	h := ""
-	if pr.Head != nil {
-		h = pr.Head.GetRef()
-	}
-	merged := pr.MergedAt != nil && !pr.MergedAt.IsZero()
-	return &PRDetails{
-		Number:    pr.GetNumber(),
-		Title:     pr.GetTitle(),
-		Body:      pr.GetBody(),
-		Author:    author,
-		State:     pr.GetState(),
-		CreatedAt: created,
-		UpdatedAt: updated,
-		Merged:    merged,
-		Draft:     pr.GetDraft(),
-		Base:      b,
-		Head:      h,
-		URL:       pr.GetHTMLURL(),
-	}, nil
+	return githubPRDetails(pr), nil
 }
 
 func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetails, error) {
@@ -149,7 +116,7 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	}
 
 	// Check existing open MR for source branch
-	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
+	project := gitlabProject(nfo)
 	mrs, _, err := gl.MergeRequests.ListProjectMergeRequests(project, &gitlab.ListProjectMergeRequestsOptions{
 		State:        new("opened"),
 		SourceBranch: new(head),
@@ -176,32 +143,7 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	if err != nil {
 		return nil, err
 	}
-	var created, updated time.Time
-	if mr.CreatedAt != nil {
-		created = *mr.CreatedAt
-	}
-	if mr.UpdatedAt != nil {
-		updated = *mr.UpdatedAt
-	}
-	author := ""
-	if mr.Author != nil {
-		author = mr.Author.Username
-	}
-	merged := mr.MergedAt != nil && !mr.MergedAt.IsZero()
-	return &PRDetails{
-		Number:    int(mr.IID),
-		Title:     mr.Title,
-		Body:      mr.Description,
-		Author:    author,
-		State:     mr.State,
-		CreatedAt: created,
-		UpdatedAt: updated,
-		Merged:    merged,
-		Draft:     false,
-		Base:      mr.TargetBranch,
-		Head:      mr.SourceBranch,
-		URL:       mr.WebURL,
-	}, nil
+	return gitlabPRDetails(&mr.BasicMergeRequest), nil
 }
 
 func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetails, error) {

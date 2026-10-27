@@ -108,7 +108,7 @@ func branchListRemoteGitLab(ctx context.Context, nfo *Info, opts BranchListOptio
 	if err != nil {
 		return nil, err
 	}
-	project := fmt.Sprintf("%s/%s", nfo.Owner, nfo.Repo)
+	project := gitlabProject(nfo)
 	var page int64 = 1
 	var perPage int64 = 100
 	var out []BranchInfo

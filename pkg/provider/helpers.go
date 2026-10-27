@@ -129,7 +129,7 @@ func DefaultBranchGitHub(ctx context.Context, gh *githublib.Client, nfo *Info) (
 
 // DefaultBranchGitLab returns the default branch for a GitLab project.
 func DefaultBranchGitLab(ctx context.Context, gl *gitlab.Client, nfo *Info) (string, error) {
-	projectPath := nfo.Owner + "/" + nfo.Repo
+	projectPath := gitlabProject(nfo)
 
 	proj, _, err := gl.Projects.GetProject(projectPath, nil)
 	if err != nil {
