@@ -130,10 +130,6 @@ func bitbucketTasksEndpoint(nfo *Info, number int) string {
 }
 
 func prTasksBitbucket(ctx context.Context, nfo *Info, number int, opts TaskListOptions) ([]PRTask, error) {
-	bb, err := newBitbucketAPIClient(nfo)
-	if err != nil {
-		return nil, err
-	}
 	params := url.Values{}
 	switch strings.ToLower(strings.TrimSpace(opts.State)) {
 	case "", "all":
@@ -143,6 +139,10 @@ func prTasksBitbucket(ctx context.Context, nfo *Info, number int, opts TaskListO
 		params.Set("q", `state = "RESOLVED"`)
 	default:
 		return nil, invalidArgf("invalid task state %q (want open, resolved or all)", opts.State)
+	}
+	bb, err := newBitbucketAPIClient(nfo)
+	if err != nil {
+		return nil, err
 	}
 	out := []PRTask{}
 	err = bitbucketListPages(ctx, bb, bitbucketTasksEndpoint(nfo, number), params, func(t bitbucketTask) bool {

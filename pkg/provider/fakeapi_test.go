@@ -124,3 +124,39 @@ func TestRequestsHonorContext(t *testing.T) {
 		f.mu.Unlock()
 	}
 }
+
+func TestMissingTokenIsAuthError(t *testing.T) {
+	for _, setup := range []func(*testing.T) (*fakeAPI, *Info){fakeGitHub, fakeGitLab, fakeBitbucketAPI} {
+		f, info := setup(t)
+		t.Setenv("GITHUB_TOKEN", "")
+		t.Setenv("GITLAB_TOKEN", "")
+		t.Setenv("BITBUCKET_TOKEN", "")
+		_, err := info.Provider.PrView(t.Context(), info, 1)
+		if !IsAuthError(err) || IsNotFound(err) {
+			t.Errorf("%s: err = %v, want auth error", info.Provider, err)
+		}
+		f.mu.Lock()
+		if len(f.calls) > 0 {
+			t.Errorf("%s: sent %v without credentials", info.Provider, f.calls)
+		}
+		f.mu.Unlock()
+	}
+}
+
+func TestRejectedTokenIsAuthError(t *testing.T) {
+	for _, tc := range []struct {
+		setup func(*testing.T) (*fakeAPI, *Info)
+		path  string
+	}{
+		{fakeGitHub, "GET /api/v3/repos/owner/repo/pulls/1"},
+		{fakeGitLab, "GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests/1"},
+		{fakeBitbucketAPI, "GET /repositories/workspace/repo/pullrequests/1"},
+	} {
+		f, info := tc.setup(t)
+		f.reply(tc.path, http.StatusUnauthorized, `{"message":"Bad credentials"}`)
+		_, err := info.Provider.PrView(t.Context(), info, 1)
+		if !IsAuthError(err) {
+			t.Errorf("%s: err = %v, want auth error", info.Provider, err)
+		}
+	}
+}

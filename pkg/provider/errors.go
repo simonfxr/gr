@@ -12,16 +12,46 @@ import (
 // IsNotFound reports whether err is a provider API "404 Not Found" response,
 // e.g. for a non-existent PR, comment or task.
 func IsNotFound(err error) bool {
+	return httpStatus(err) == http.StatusNotFound
+}
+
+// IsAuthError reports whether err is caused by missing credentials or by
+// credentials the provider rejected (HTTP 401).
+func IsAuthError(err error) bool {
+	if _, ok := errors.AsType[*AuthError](err); ok {
+		return true
+	}
+	return httpStatus(err) == http.StatusUnauthorized
+}
+
+// httpStatus returns the HTTP status code of a provider API error, or 0.
+func httpStatus(err error) int {
 	if err == nil {
-		return false
+		return 0
 	}
-	if bbAPI, ok := errors.AsType[*bitbucketAPIError](err); ok {
-		return bbAPI.status == http.StatusNotFound
+	if bb, ok := errors.AsType[*bitbucketAPIError](err); ok {
+		return bb.status
 	}
-	if gh, ok := errors.AsType[*githublib.ErrorResponse](err); ok {
-		return gh.Response != nil && gh.Response.StatusCode == http.StatusNotFound
+	if gh, ok := errors.AsType[*githublib.ErrorResponse](err); ok && gh.Response != nil {
+		return gh.Response.StatusCode
 	}
-	return errors.Is(err, gitlab.ErrNotFound)
+	if errors.Is(err, gitlab.ErrNotFound) {
+		return http.StatusNotFound
+	}
+	if gl, ok := errors.AsType[*gitlab.ErrorResponse](err); ok && gl.Response != nil {
+		return gl.Response.StatusCode
+	}
+	return 0
+}
+
+// AuthError reports missing credentials.
+type AuthError struct{ msg string }
+
+func (e *AuthError) Error() string { return e.msg }
+
+// missingToken is the error for a provider without configured token.
+func missingToken(name, env, section string) error {
+	return &AuthError{msg: fmt.Sprintf("%s token not configured (set %s, or token or credential_helper under [%s] in ~/.config/gr/config.toml)", name, env, section)}
 }
 
 // InvalidArgumentError reports a caller error detected before contacting the

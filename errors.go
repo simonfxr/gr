@@ -15,6 +15,7 @@ const (
 	exitError    = 1 // any other failure (API, network, git, ...)
 	exitUsage    = 2 // invalid or conflicting arguments
 	exitNotFound = 3 // PR (or comment/task) not found, or PR selection ambiguous
+	exitAuth     = 4 // credentials missing or rejected
 	// exitInterrupted follows the shell convention 128+SIGINT.
 	exitInterrupted = 130
 )
@@ -26,6 +27,7 @@ const (
 	kindNotFound    = "not_found"
 	kindAmbiguous   = "ambiguous"
 	kindInterrupted = "interrupted"
+	kindAuth        = "auth"
 )
 
 // cliError is an error with a machine-readable kind.
@@ -53,6 +55,9 @@ func errorKind(err error) string {
 	if _, ok := errors.AsType[*provider.InvalidArgumentError](err); ok {
 		return kindUsage
 	}
+	if provider.IsAuthError(err) {
+		return kindAuth
+	}
 	if provider.IsNotFound(err) {
 		return kindNotFound
 	}
@@ -65,6 +70,8 @@ func exitCode(err error) int {
 		return exitUsage
 	case kindNotFound, kindAmbiguous:
 		return exitNotFound
+	case kindAuth:
+		return exitAuth
 	case kindInterrupted:
 		return exitInterrupted
 	default:

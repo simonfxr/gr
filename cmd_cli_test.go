@@ -167,12 +167,23 @@ func TestErrorReporting(t *testing.T) {
 }
 
 func TestProviderErrorsMapToExitCodes(t *testing.T) {
+	status := http.StatusNotFound
 	fakeBitbucket(t, func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"error":{"message":"not found"}}`, http.StatusNotFound)
+		http.Error(w, `{"error":{"message":"nope"}}`, status)
 	})
 	err := runPR(t.Context(), &PRCmd{Tasks: &PRTasksCmd{Number: "9999"}}, bitbucketInfo)
 	if exitCode(err) != exitNotFound {
 		t.Errorf("404: got %v (exit %d)", err, exitCode(err))
+	}
+	status = http.StatusUnauthorized
+	err = runPR(t.Context(), &PRCmd{Tasks: &PRTasksCmd{Number: "1"}}, bitbucketInfo)
+	if exitCode(err) != exitAuth || errorKind(err) != kindAuth {
+		t.Errorf("401: got %v (exit %d)", err, exitCode(err))
+	}
+	t.Setenv("BITBUCKET_TOKEN", "")
+	err = runPR(t.Context(), &PRCmd{Tasks: &PRTasksCmd{Number: "1"}}, bitbucketInfo)
+	if exitCode(err) != exitAuth {
+		t.Errorf("no token: got %v (exit %d)", err, exitCode(err))
 	}
 	err = runPR(t.Context(), &PRCmd{Tasks: &PRTasksCmd{Number: "1", State: "bogus"}}, bitbucketInfo)
 	if exitCode(err) != exitUsage {

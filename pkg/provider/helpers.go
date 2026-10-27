@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -32,12 +31,12 @@ func githubClient(ctx context.Context, nfo *Info) (*githublib.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("github token: %w", err)
 	}
-
-	var httpClient *http.Client
-	if token != "" {
-		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-		httpClient = oauth2.NewClient(ctx, ts)
+	if token == "" {
+		// Anonymous access would hide private repositories behind 404s and
+		// hit the 60 requests/hour limit quickly.
+		return nil, missingToken("github", "GITHUB_TOKEN", "github")
 	}
+	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))
 
 	if nfo != nil && nfo.Provider == ProviderGitHub && nfo.Variant == "self-hosted" && nfo.HTTPBase != "" {
 		base := strings.TrimRight(nfo.HTTPBase, "/") + "/api/v3/"
@@ -58,7 +57,7 @@ func gitlabClient(ctx context.Context, nfo *Info) (*gitlab.Client, error) {
 		return nil, fmt.Errorf("gitlab token: %w", err)
 	}
 	if token == "" {
-		return nil, errors.New("gitlab token not configured (set GITLAB_TOKEN or configure in ~/.config/gr/config.toml)")
+		return nil, missingToken("gitlab", "GITLAB_TOKEN", "gitlab")
 	}
 	opts := []gitlab.ClientOptionFunc{gitlab.WithRequestOptions(gitlab.WithContext(ctx))}
 	if nfo != nil && nfo.Provider == ProviderGitLab && nfo.Variant == "self-hosted" && nfo.HTTPBase != "" {
@@ -84,7 +83,7 @@ func bitbucketCredentials(nfo *Info) (string, string, error) {
 	if token != "" {
 		return user, token, nil
 	}
-	return "", "", errors.New("bitbucket token not configured (set BITBUCKET_TOKEN or configure in ~/.config/gr/config.toml)")
+	return "", "", missingToken("bitbucket", "BITBUCKET_TOKEN", "bitbucket")
 }
 
 // CurrentBranch returns the current branch name of the repository detected from Info.
