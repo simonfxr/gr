@@ -11,6 +11,12 @@ import (
 	"golang.org/x/term"
 )
 
+// StdoutIsTerminal reports whether Render produces a table rather than CSV.
+// Use it to gate decorations (titles, summaries) that would corrupt CSV output.
+func StdoutIsTerminal() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
 // Render prints rows as a formatted table when stdout is a TTY.
 // If stdout is not a TTY (e.g., piped), it prints CSV.
 // columns defines the header names. rowIter yields each row of values.

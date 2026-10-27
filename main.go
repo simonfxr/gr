@@ -27,6 +27,7 @@ type PRCmd struct {
 	Checkout    *PRCheckoutCmd    `arg:"subcommand:checkout" help:"checkout a pull request branch (not implemented yet)"`
 	Merge       *PRMergeCmd       `arg:"subcommand:merge" help:"merge a pull request"`
 	Close       *PRCloseCmd       `arg:"subcommand:close" help:"close a pull request"`
+	Todo        *PRTodoCmd        `arg:"subcommand:todo" help:"list what is left on a PR: open tasks and unresolved comments"`
 	Comments    *PRCommentsCmd    `arg:"subcommand:comments" help:"show review comments for a pull/merge request"`
 	AddComment  *PRAddCommentCmd  `arg:"subcommand:addcomment" help:"add an inline review comment to a pull request"`
 	AddComments *PRAddCommentsCmd `arg:"subcommand:addcomments" help:"add multiple inline comments from a JSON file"`
@@ -93,6 +94,11 @@ type PRCloseCmd struct {
 	PRSelector
 	DeleteBranch bool `arg:"--delete-branch" help:"delete source branch after closing"`
 	JSON         bool `arg:"--json" help:"output as JSON"`
+}
+
+type PRTodoCmd struct {
+	PRSelector
+	JSON bool `arg:"--json" help:"output as JSON"`
 }
 
 type PRCommentsCmd struct {

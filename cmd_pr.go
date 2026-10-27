@@ -36,6 +36,8 @@ func runPR(cmd *PRCmd, info *provider.Info) error {
 		return prMerge(ctx, info, cmd.Merge)
 	case cmd.Close != nil:
 		return prClose(ctx, info, cmd.Close)
+	case cmd.Todo != nil:
+		return prTodo(ctx, info, cmd.Todo)
 	case cmd.Comments != nil:
 		return prComments(ctx, info, cmd.Comments)
 	case cmd.AddComment != nil:

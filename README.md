@@ -18,6 +18,7 @@ gr pr merge [PR]        # Merge a PR
 gr pr close [PR]        # Close a PR
 gr pr browse [PR]       # Open PR in browser
 
+gr pr todo              # What is left: open tasks + unresolved comments (Bitbucket)
 gr pr comments          # List review comments
 gr pr addcomment <file:line> <text>
 gr pr addcomments --from-json <file|->
@@ -71,6 +72,20 @@ MSG
 - **Batch comments:** `addcomments --json` prints one result per input item
   (`{path, line, ok, comment | error}`) and exits `1` if any item failed.
 - **Tables:** when stdout is not a terminal, tables are printed as CSV.
+
+### PR todo list
+
+```bash
+gr pr todo            # current branch's PR
+gr pr todo -n 1282 --json
+```
+
+Lists open tasks and unresolved top-level comment threads, oldest first. Each
+item has `kind` (`task`/`comment`), `id`, `author`, `body`, `created_at` and,
+when known, the code location (`path`, `line`). Tasks attached to a comment
+inherit its location and carry `comment_id` and `pending`; comments include
+their thread `replies`. Close items with `gr pr resolvetask ID` or
+`gr pr resolve ID`.
 
 ### Bitbucket listings
 

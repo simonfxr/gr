@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simonfxr/gr/pkg/provider"
 )
@@ -276,6 +277,47 @@ func TestReplyAndAddCommentPayloads(t *testing.T) {
 	})
 	if want := map[string]any{"content": map[string]any{"raw": "hi"}, "inline": map[string]any{"path": "dir/a:b.go", "to": float64(12)}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("addcomment payload = %v", got)
+	}
+}
+
+func TestBuildTodo(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 10, 27, 10, min, 0, 0, time.UTC) }
+	comments := []provider.PRComment{
+		{ID: 1, Author: "rev", Body: "rename this", Path: "a.go", Line: 3, CreatedAt: at(1)},
+		{ID: 2, Author: "me", Body: "why?", ParentID: 1, CreatedAt: at(5)},
+		{ID: 3, Author: "rev", Body: "because", ParentID: 2, CreatedAt: at(6)},
+		{ID: 4, Author: "rev", Body: "fixed already", Resolved: true, CreatedAt: at(2)},
+		{ID: 5, Author: "rev", Body: "general remark", CreatedAt: at(0)},
+	}
+	tasks := []provider.PRTask{
+		{ID: 10, Body: "task on reply", CommentID: 3, Creator: "rev", CreatedAt: at(7)},
+		{ID: 11, Body: "free task", Pending: true, CreatedAt: at(3)},
+		{ID: 12, Body: "done task", Resolved: true, CreatedAt: at(4)},
+	}
+	r := buildTodo(42, comments, tasks)
+	if r.PR != 42 || r.OpenTasks != 2 || r.UnresolvedComments != 2 {
+		t.Errorf("counts = %+v", r)
+	}
+	var order []string
+	for _, it := range r.Items {
+		order = append(order, fmt.Sprintf("%s:%d", it.Kind, it.ID))
+	}
+	if want := []string{"comment:5", "comment:1", "task:11", "task:10"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("order = %v, want %v", order, want)
+	}
+	thread := r.Items[1]
+	if len(thread.Replies) != 2 || thread.Replies[0].ID != 2 || thread.Replies[1].ID != 3 {
+		t.Errorf("thread replies = %+v", thread.Replies)
+	}
+	// Task attached to a reply inherits the thread's code location.
+	if task := r.Items[3]; task.Path != "a.go" || task.Line != 3 || task.CommentID != 3 {
+		t.Errorf("task location = %+v", task)
+	}
+	if !r.Items[2].Pending {
+		t.Error("pending flag lost")
+	}
+	if empty := buildTodo(1, nil, nil); empty.Items == nil {
+		t.Error("items must serialize as [] when empty")
 	}
 }
 
