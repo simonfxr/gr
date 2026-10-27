@@ -194,3 +194,10 @@ func TestBitbucketPrMergeOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestBitbucketPrListRejectsAssignee(t *testing.T) {
+	_, info := fakeBitbucketAPI(t)
+	if _, err := ProviderBitbucket.PrList(t.Context(), info, ListOptions{Assignee: "me"}); !IsUnsupported(err) {
+		t.Errorf("err = %v, want unsupported", err)
+	}
+}

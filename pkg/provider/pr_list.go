@@ -227,6 +227,9 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 const bitbucketPRMaxPageSize = 50
 
 func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRequest, error) {
+	if opts.Assignee != "" {
+		return nil, unsupported("--assignee (Bitbucket PRs have reviewers, not assignees)", ProviderBitbucket)
+	}
 	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return nil, err
@@ -279,7 +282,6 @@ func prListBitbucket(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRe
 		pageSize = max(10, min(opts.Limit, bitbucketPRMaxPageSize))
 	}
 	params.Set("pagelen", strconv.Itoa(pageSize))
-	// Bitbucket Cloud does not have PR assignees; preserve existing behavior.
 	endpoint := bitbucketRepoEndpoint(nfo) + "/pullrequests"
 	var out []PullRequest
 	collect := func(pr bitbucketPR) bool {
