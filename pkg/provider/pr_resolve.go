@@ -13,6 +13,8 @@ func (p Provider) PrResolveComment(ctx context.Context, nfo *Info, number, comme
 		return errors.New("missing repo info")
 	}
 	switch p {
+	case ProviderGitHub:
+		return prResolveGitHub(ctx, nfo, number, commentID)
 	case ProviderGitLab:
 		return prResolveGitLab(ctx, nfo, number, commentID)
 	case ProviderBitbucket:

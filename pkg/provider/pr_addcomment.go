@@ -33,7 +33,7 @@ func (p Provider) PrAddComment(ctx context.Context, nfo *Info, number int, opts 
 			"inline":  map[string]any{"to": opts.Line, "path": opts.Path},
 		})
 	case ProviderGitHub:
-		return nil, unsupported("pr addcomment", p)
+		return prAddCommentGitHub(ctx, nfo, number, opts)
 	case ProviderGitLab:
 		return prAddCommentGitLab(ctx, nfo, number, opts)
 	default:

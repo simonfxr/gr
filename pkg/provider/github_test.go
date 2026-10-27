@@ -3,6 +3,7 @@ package provider
 import (
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 const githubPR7 = `{"number":7,"title":"Add x","body":"desc","state":"open","draft":true,
 	"user":{"login":"alice"},"created_at":"2026-10-01T10:00:00Z","updated_at":"2026-10-02T10:00:00Z",
 	"base":{"ref":"main","repo":{"name":"repo","owner":{"login":"owner"}}},
-	"head":{"ref":"feature/x","repo":{"name":"repo","owner":{"login":"owner"}}},
+	"head":{"ref":"feature/x","sha":"abc","repo":{"name":"repo","owner":{"login":"owner"}}},
 	"html_url":"https://github.example/owner/repo/pull/7"}`
 
 func TestGitHubPrView(t *testing.T) {
@@ -78,8 +79,8 @@ func TestGitHubPrMergeDeletesBranch(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, info := fakeGitHub(t)
-			pr := strings.Replace(githubPR7, `"head":{"ref":"feature/x","repo":{"name":"repo","owner":{"login":"owner"}}}`,
-				`"head":{"ref":"feature/x","repo":`+tc.headRepo+`}`, 1)
+			pr := strings.Replace(githubPR7, `"head":{"ref":"feature/x","sha":"abc","repo":{"name":"repo","owner":{"login":"owner"}}}`,
+				`"head":{"ref":"feature/x","sha":"abc","repo":`+tc.headRepo+`}`, 1)
 			f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, pr)
 			f.reply("PUT /api/v3/repos/owner/repo/pulls/7/merge", http.StatusOK, `{"merged":true}`)
 			f.reply("DELETE "+tc.deletePath, http.StatusNoContent, ``)
@@ -195,5 +196,117 @@ func TestGitHubPrListStates(t *testing.T) {
 		if !reflect.DeepEqual(numbers, tc.want) {
 			t.Errorf("%s: numbers = %v, want %v", tc.state, numbers, tc.want)
 		}
+	}
+}
+
+// githubThreadsHandler serves the reviewThreads query (thread T1 with root
+// 100 and reply 101, resolved as given) and the resolveReviewThread mutation.
+func githubThreadsHandler(t *testing.T, resolved bool, mutated *bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req := decodeJSON(t, r)
+		query, _ := req["query"].(string)
+		vars, _ := req["variables"].(map[string]any)
+		if strings.HasPrefix(query, "mutation") {
+			if vars["id"] != "T1" {
+				t.Errorf("mutation variables = %v", vars)
+			}
+			*mutated = true
+			writeJSON(w, http.StatusOK, `{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}`)
+			return
+		}
+		if vars["owner"] != "owner" || vars["repo"] != "repo" || vars["number"] != float64(7) {
+			t.Errorf("query variables = %v", vars)
+		}
+		writeJSON(w, http.StatusOK, `{"data":{"repository":{"pullRequest":{"reviewThreads":{
+			"pageInfo":{"hasNextPage":false,"endCursor":"x"},
+			"nodes":[{"id":"T1","isResolved":`+strconv.FormatBool(resolved)+`,
+				"comments":{"nodes":[{"databaseId":100},{"databaseId":101}]}}]}}}}}`)
+	}
+}
+
+func TestGitHubPrComments(t *testing.T) {
+	f, info := fakeGitHub(t)
+	f.reply("GET /api/v3/repos/owner/repo/issues/7/comments", http.StatusOK,
+		`[{"id":1,"body":"LGTM?","user":{"login":"bob"},"created_at":"2026-10-01T09:00:00Z","html_url":"u1"}]`)
+	f.reply("GET /api/v3/repos/owner/repo/pulls/7/comments", http.StatusOK, `[
+		{"id":100,"body":"rename","user":{"login":"rev"},"path":"a.go","line":3,"created_at":"2026-10-01T10:00:00Z","html_url":"u100"},
+		{"id":101,"body":"done","user":{"login":"alice"},"path":"a.go","original_line":3,"in_reply_to_id":100,"created_at":"2026-10-01T11:00:00Z"}]`)
+	var mutated bool
+	f.handle("POST /api/graphql", githubThreadsHandler(t, false, &mutated))
+	comments, err := ProviderGitHub.PrComments(t.Context(), info, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(h int) time.Time { return time.Date(2026, 10, 1, h, 0, 0, 0, time.UTC) }
+	want := []PRComment{
+		{ID: 1, Author: "bob", Body: "LGTM?", CreatedAt: at(9), URL: "u1"},
+		{ID: 100, Author: "rev", Body: "rename", CreatedAt: at(10), Resolvable: true, Path: "a.go", Line: 3, URL: "u100"},
+		{ID: 101, Author: "alice", Body: "done", CreatedAt: at(11), Path: "a.go", Line: 3, ParentID: 100},
+	}
+	if !reflect.DeepEqual(comments, want) {
+		t.Errorf("comments:\n got %+v\nwant %+v", comments, want)
+	}
+}
+
+func TestGitHubPrAddComment(t *testing.T) {
+	f, info := fakeGitHub(t)
+	f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, githubPR7)
+	f.handle("POST /api/v3/repos/owner/repo/pulls/7/comments", func(w http.ResponseWriter, r *http.Request) {
+		want := map[string]any{"body": "fix", "commit_id": "abc", "path": "a.go", "line": float64(9), "side": "RIGHT"}
+		if got := decodeJSON(t, r); !reflect.DeepEqual(got, want) {
+			t.Errorf("payload = %v", got)
+		}
+		writeJSON(w, http.StatusCreated, `{"id":200,"body":"fix","path":"a.go","line":9}`)
+	})
+	c, err := ProviderGitHub.PrAddComment(t.Context(), info, 7, AddCommentOptions{Path: "a.go", Line: 9, Body: "fix"})
+	if err != nil || c.ID != 200 || !c.Resolvable || c.Line != 9 {
+		t.Errorf("got %+v, %v", c, err)
+	}
+}
+
+func TestGitHubPrReply(t *testing.T) {
+	f, info := fakeGitHub(t)
+	f.reply("GET /api/v3/repos/owner/repo/pulls/comments/101", http.StatusOK, `{"id":101,"in_reply_to_id":100}`)
+	f.handle("POST /api/v3/repos/owner/repo/pulls/7/comments", func(w http.ResponseWriter, r *http.Request) {
+		if got := decodeJSON(t, r); !reflect.DeepEqual(got, map[string]any{"body": "ok", "in_reply_to": float64(100)}) {
+			t.Errorf("payload = %v", got)
+		}
+		writeJSON(w, http.StatusCreated, `{"id":102,"body":"ok","in_reply_to_id":100}`)
+	})
+	if c, err := ProviderGitHub.PrReplyComment(t.Context(), info, 7, 101, "ok"); err != nil || c.ID != 102 || c.ParentID != 100 {
+		t.Errorf("review reply = %+v, %v", c, err)
+	}
+
+	// Conversation comments have no threads: quote reply.
+	f.reply("GET /api/v3/repos/owner/repo/pulls/comments/1", http.StatusNotFound, `{"message":"Not Found"}`)
+	f.reply("GET /api/v3/repos/owner/repo/issues/comments/1", http.StatusOK, `{"id":1,"body":"LGTM?\nreally","user":{"login":"bob"}}`)
+	f.handle("POST /api/v3/repos/owner/repo/issues/7/comments", func(w http.ResponseWriter, r *http.Request) {
+		if got := decodeJSON(t, r)["body"]; got != "> @bob wrote:\n>\n> LGTM?\n> really\n\nyes" {
+			t.Errorf("body = %q", got)
+		}
+		writeJSON(w, http.StatusCreated, `{"id":2,"body":"..."}`)
+	})
+	if c, err := ProviderGitHub.PrReplyComment(t.Context(), info, 7, 1, "yes"); err != nil || c.ID != 2 {
+		t.Errorf("quote reply = %+v, %v", c, err)
+	}
+
+	f.reply("GET /api/v3/repos/owner/repo/pulls/comments/9", http.StatusNotFound, `{"message":"Not Found"}`)
+	f.reply("GET /api/v3/repos/owner/repo/issues/comments/9", http.StatusNotFound, `{"message":"Not Found"}`)
+	if _, err := ProviderGitHub.PrReplyComment(t.Context(), info, 7, 9, "x"); !IsNotFound(err) {
+		t.Errorf("unknown comment: err = %v", err)
+	}
+}
+
+func TestGitHubPrResolve(t *testing.T) {
+	f, info := fakeGitHub(t)
+	var mutated bool
+	f.handle("POST /api/graphql", githubThreadsHandler(t, false, &mutated))
+	// A reply's ID resolves its thread.
+	if err := ProviderGitHub.PrResolveComment(t.Context(), info, 7, 101); err != nil || !mutated {
+		t.Errorf("resolve: %v (mutated %v)", err, mutated)
+	}
+	f.reply("GET /api/v3/repos/owner/repo/issues/comments/1", http.StatusOK, `{"id":1}`)
+	if err := ProviderGitHub.PrResolveComment(t.Context(), info, 7, 1); !isInvalidArg(err) {
+		t.Errorf("conversation comment: err = %v", err)
 	}
 }

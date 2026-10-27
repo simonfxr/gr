@@ -235,7 +235,11 @@ func prComments(ctx context.Context, info *provider.Info, cmd *PRCommentsCmd) er
 			if c.ParentID > 0 {
 				body = fmt.Sprintf("(reply to %d) %s", c.ParentID, body)
 			}
-			if !yield([]string{strconv.Itoa(c.ID), formatTime(c.CreatedAt), c.Author, strconv.FormatBool(c.Resolved), body}) {
+			resolved := "-" // replies and comments that cannot be resolved
+			if c.Resolvable {
+				resolved = strconv.FormatBool(c.Resolved)
+			}
+			if !yield([]string{strconv.Itoa(c.ID), formatTime(c.CreatedAt), c.Author, resolved, body}) {
 				return
 			}
 		}

@@ -19,7 +19,7 @@ gr pr close [PR]        # Close a PR
 gr pr browse [PR]       # Open PR in browser
 
 gr pr todo              # What is left: open tasks + unresolved comment threads
-gr pr comments          # List review comments (Bitbucket, GitLab)
+gr pr comments          # List review comments
 gr pr addcomment <file:line> <text>
 gr pr addcomments --from-json <file|->
 gr pr reply <comment-id> <text>
@@ -106,12 +106,14 @@ attached to a comment inherit its location and carry `comment_id` and
 `pending`; comments include their thread `replies`. Close items with
 `gr pr resolvetask ID` or `gr pr resolve ID`.
 
-Only resolvable threads are listed: every top-level comment on Bitbucket, and
-threads (including inline comments) on GitLab, but not standalone GitLab
-notes. In `gr pr comments`, thread roots carry `resolvable`; replies have
-`parent_id` (on GitLab the thread's first comment). On GitLab, `reply` and
-`resolve` take any comment ID of a thread and act on the whole thread;
-replying to a standalone note starts a thread.
+Only resolvable threads are listed: every top-level comment on Bitbucket,
+threads (including inline comments) on GitLab, and review threads on GitHub.
+Standalone GitLab notes and GitHub conversation comments cannot be resolved.
+In `gr pr comments`, thread roots carry `resolvable`; replies have `parent_id`
+(on GitLab and GitHub the thread's first comment). On GitLab and GitHub,
+`reply` and `resolve` take any comment ID of a thread and act on the whole
+thread. Replying to a standalone GitLab note starts a thread; replying to a
+GitHub conversation comment posts a new comment quoting it.
 
 ### Bitbucket listings
 

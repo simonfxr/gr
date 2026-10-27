@@ -97,7 +97,7 @@ func prResolveGitLab(ctx context.Context, nfo *Info, number, commentID int) erro
 
 // gitlabDiscussions lists all discussions of a merge request.
 func gitlabDiscussions(gl *gitlab.Client, nfo *Info, number int) ([]*gitlab.Discussion, error) {
-	opts := &gitlab.ListMergeRequestDiscussionsOptions{ListOptions: gitlab.ListOptions{PerPage: 100, Page: 1}}
+	opts := &gitlab.ListMergeRequestDiscussionsOptions{PerPage: 100, Page: 1}
 	var out []*gitlab.Discussion
 	for {
 		ds, resp, err := gl.Discussions.ListMergeRequestDiscussions(gitlabProject(nfo), int64(number), opts)

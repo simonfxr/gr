@@ -36,7 +36,7 @@ func (p Provider) PrComments(ctx context.Context, nfo *Info, number int) ([]PRCo
 	case ProviderGitLab:
 		return prCommentsGitLab(ctx, nfo, number)
 	case ProviderGitHub:
-		return nil, unsupported("pr comments", p)
+		return prCommentsGitHub(ctx, nfo, number)
 	case ProviderBitbucket:
 		return prCommentsBitbucket(ctx, nfo, number)
 	default:
