@@ -54,7 +54,7 @@ func prCommentsGitLab(ctx context.Context, nfo *Info, number int) ([]PRComment, 
 
 	// Use Notes API for MR. Filter out system notes to get human review comments.
 	perPage := int64(100)
-	opts := &gitlab.ListMergeRequestNotesOptions{ListOptions: gitlab.ListOptions{PerPage: perPage, Page: 1}}
+	opts := &gitlab.ListMergeRequestNotesOptions{PerPage: perPage, Page: 1}
 	var out []PRComment
 	for {
 		notes, resp, err := gl.Notes.ListMergeRequestNotes(project, int64(number), opts)

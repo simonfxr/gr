@@ -169,11 +169,11 @@ func TestProviderErrorsMapToExitCodes(t *testing.T) {
 	fakeBitbucket(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"not found"}}`, http.StatusNotFound)
 	})
-	err := runPR(&PRCmd{Tasks: &PRTasksCmd{PRSelector: PRSelector{Number: "9999"}}}, bitbucketInfo)
+	err := runPR(&PRCmd{Tasks: &PRTasksCmd{Number: "9999"}}, bitbucketInfo)
 	if exitCode(err) != exitNotFound {
 		t.Errorf("404: got %v (exit %d)", err, exitCode(err))
 	}
-	err = runPR(&PRCmd{Tasks: &PRTasksCmd{PRSelector: PRSelector{Number: "1"}, State: "bogus"}}, bitbucketInfo)
+	err = runPR(&PRCmd{Tasks: &PRTasksCmd{Number: "1", State: "bogus"}}, bitbucketInfo)
 	if exitCode(err) != exitUsage {
 		t.Errorf("invalid state: got %v (exit %d)", err, exitCode(err))
 	}
@@ -231,7 +231,7 @@ func TestAddCommentsReportsPerItemResults(t *testing.T) {
 
 	var err error
 	out := captureStdout(t, func() {
-		err = runPR(&PRCmd{AddComments: &PRAddCommentsCmd{PRSelector: PRSelector{Number: "3"}, FromJSON: "-", JSON: true}}, bitbucketInfo)
+		err = runPR(&PRCmd{AddComments: &PRAddCommentsCmd{Number: "3", FromJSON: "-", JSON: true}}, bitbucketInfo)
 	})
 	if err == nil || exitCode(err) != exitError {
 		t.Errorf("expected failure exit, got %v", err)
@@ -258,7 +258,7 @@ func TestReplyAndAddCommentPayloads(t *testing.T) {
 		io.WriteString(w, `{"id":77,"content":{"raw":"done"},"parent":{"id":5},"user":{"display_name":"Me"}}`)
 	})
 	out := captureStdout(t, func() {
-		if err := runPR(&PRCmd{Reply: &PRReplyCmd{PRSelector: PRSelector{Number: "3"}, CommentID: 5, Body: "done", JSON: true}}, bitbucketInfo); err != nil {
+		if err := runPR(&PRCmd{Reply: &PRReplyCmd{Number: "3", CommentID: 5, Body: "done", JSON: true}}, bitbucketInfo); err != nil {
 			t.Error(err)
 		}
 	})
@@ -271,7 +271,7 @@ func TestReplyAndAddCommentPayloads(t *testing.T) {
 	}
 
 	captureStdout(t, func() {
-		if err := runPR(&PRCmd{AddComment: &PRAddCommentCmd{PRSelector: PRSelector{Number: "3"}, Location: "dir/a:b.go:12", Body: "hi"}}, bitbucketInfo); err != nil {
+		if err := runPR(&PRCmd{AddComment: &PRAddCommentCmd{Number: "3", Location: "dir/a:b.go:12", Body: "hi"}}, bitbucketInfo); err != nil {
 			t.Error(err)
 		}
 	})

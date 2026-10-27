@@ -242,8 +242,8 @@ func countGitLabOpenMRs(gl *gitlab.Client, project string, sourceBranch, targetB
 	total := 0
 	for {
 		opts := &gitlab.ListProjectMergeRequestsOptions{
-			ListOptions: gitlab.ListOptions{PerPage: perPage, Page: page},
-			State:       new("opened"),
+			PerPage: perPage, Page: page,
+			State: new("opened"),
 		}
 		if sourceBranch != nil {
 			opts.SourceBranch = sourceBranch
@@ -276,7 +276,7 @@ func retargetGitLabMRs(gl *gitlab.Client, project, oldTarget, newTarget string) 
 	var perPage int64 = 50
 	for {
 		listOpts := &gitlab.ListProjectMergeRequestsOptions{
-			ListOptions:  gitlab.ListOptions{PerPage: perPage, Page: page},
+			PerPage: perPage, Page: page,
 			State:        new("opened"),
 			TargetBranch: new(oldTarget),
 		}

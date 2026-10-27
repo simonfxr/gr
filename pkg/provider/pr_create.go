@@ -66,9 +66,9 @@ func prCreateGitHub(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 
 	// Prevent duplicate open PRs for the same head
 	prs, _, err := gh.PullRequests.List(ctx, nfo.Owner, nfo.Repo, &githublib.PullRequestListOptions{
-		State:       "open",
-		Head:        fmt.Sprintf("%s:%s", nfo.Owner, head),
-		ListOptions: githublib.ListOptions{PerPage: 1},
+		State:   "open",
+		Head:    fmt.Sprintf("%s:%s", nfo.Owner, head),
+		PerPage: 1,
 	})
 	if err == nil && len(prs) > 0 {
 		return nil, fmt.Errorf("a pull request already exists for branch %q", head)
@@ -153,7 +153,7 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	mrs, _, err := gl.MergeRequests.ListProjectMergeRequests(project, &gitlab.ListProjectMergeRequestsOptions{
 		State:        new("opened"),
 		SourceBranch: new(head),
-		ListOptions:  gitlab.ListOptions{PerPage: 1, Page: 1},
+		PerPage:      1, Page: 1,
 	})
 	if err == nil && len(mrs) > 0 {
 		return nil, fmt.Errorf("a merge request already exists for branch %q", head)

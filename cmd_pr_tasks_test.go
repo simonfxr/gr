@@ -60,7 +60,7 @@ func TestPRTasksOutput(t *testing.T) {
 
 	t.Run("json", func(t *testing.T) {
 		out := captureStdout(t, func() {
-			if err := runPR(&PRCmd{Tasks: &PRTasksCmd{PRSelector: PRSelector{Number: "42"}, State: "all", JSON: true}}, info); err != nil {
+			if err := runPR(&PRCmd{Tasks: &PRTasksCmd{Number: "42", State: "all", JSON: true}}, info); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -74,7 +74,7 @@ func TestPRTasksOutput(t *testing.T) {
 	})
 	t.Run("table", func(t *testing.T) {
 		out := captureStdout(t, func() {
-			if err := runPR(&PRCmd{Tasks: &PRTasksCmd{PRSelector: PRSelector{Number: "42"}, State: "all"}}, info); err != nil {
+			if err := runPR(&PRCmd{Tasks: &PRTasksCmd{Number: "42", State: "all"}}, info); err != nil {
 				t.Fatal(err)
 			}
 		})

@@ -51,7 +51,7 @@ func TestPRCommentsResolutionOutput(t *testing.T) {
 			os.Stdout = output
 			defer func() { os.Stdout = originalStdout }()
 
-			if err := runPR(&PRCmd{Comments: &PRCommentsCmd{PRSelector: PRSelector{Number: "42"}, JSON: jsonOutput}}, info); err != nil {
+			if err := runPR(&PRCmd{Comments: &PRCommentsCmd{Number: "42", JSON: jsonOutput}}, info); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := output.Seek(0, io.SeekStart); err != nil {

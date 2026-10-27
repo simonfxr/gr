@@ -16,16 +16,13 @@ func IsNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	var bbAPI *bitbucketAPIError
-	if errors.As(err, &bbAPI) {
+	if bbAPI, ok := errors.AsType[*bitbucketAPIError](err); ok {
 		return bbAPI.status == http.StatusNotFound
 	}
-	var bbSDK *bitbucket.UnexpectedResponseStatusError
-	if errors.As(err, &bbSDK) {
+	if bbSDK, ok := errors.AsType[*bitbucket.UnexpectedResponseStatusError](err); ok {
 		return bbSDK.StatusCode == http.StatusNotFound
 	}
-	var gh *githublib.ErrorResponse
-	if errors.As(err, &gh) {
+	if gh, ok := errors.AsType[*githublib.ErrorResponse](err); ok {
 		return gh.Response != nil && gh.Response.StatusCode == http.StatusNotFound
 	}
 	return errors.Is(err, gitlab.ErrNotFound)

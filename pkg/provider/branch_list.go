@@ -50,7 +50,7 @@ func branchListRemoteGitHub(ctx context.Context, nfo *Info, opts BranchListOptio
 	if err != nil {
 		return nil, err
 	}
-	listOpts := &githublib.BranchListOptions{ListOptions: githublib.ListOptions{PerPage: 100, Page: 1}}
+	listOpts := &githublib.BranchListOptions{PerPage: 100, Page: 1}
 	type stub struct {
 		name string
 		sha  string
@@ -113,7 +113,7 @@ func branchListRemoteGitLab(ctx context.Context, nfo *Info, opts BranchListOptio
 	var perPage int64 = 100
 	var out []BranchInfo
 	for {
-		branches, resp, err := gl.Branches.ListBranches(project, &gitlab.ListBranchesOptions{ListOptions: gitlab.ListOptions{PerPage: perPage, Page: page}})
+		branches, resp, err := gl.Branches.ListBranches(project, &gitlab.ListBranchesOptions{PerPage: perPage, Page: page})
 		if err != nil {
 			return nil, err
 		}

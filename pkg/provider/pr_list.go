@@ -89,12 +89,10 @@ func prListGitHub(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 	}
 
 	ghOpts := &githublib.PullRequestListOptions{
-		State: state,
-		Base:  opts.Base,
-		Head:  head,
-		ListOptions: githublib.ListOptions{
-			PerPage: perPage,
-		},
+		State:   state,
+		Base:    opts.Base,
+		Head:    head,
+		PerPage: perPage,
 	}
 
 	var results []PullRequest
@@ -191,7 +189,7 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 	}
 
 	listOpts := &gitlab.ListProjectMergeRequestsOptions{
-		ListOptions: gitlab.ListOptions{PerPage: int64(perPage), Page: 1},
+		PerPage: int64(perPage), Page: 1,
 	}
 	if glState != nil {
 		listOpts.State = glState
