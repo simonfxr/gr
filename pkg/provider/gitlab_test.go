@@ -3,6 +3,7 @@ package provider
 import (
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -70,5 +71,37 @@ func TestGitLabPrListPaginates(t *testing.T) {
 	}
 	if !reflect.DeepEqual(numbers, []int{1, 2, 3}) {
 		t.Errorf("numbers = %v", numbers)
+	}
+}
+
+func TestGitLabPrMergeOptions(t *testing.T) {
+	for _, tc := range []struct {
+		opts MergeOptions
+		want map[string]any
+	}{
+		// Unset options must not override the MR's squash/remove-branch settings.
+		{MergeOptions{}, map[string]any{}},
+		{MergeOptions{Method: "merge", DeleteBranch: new(false)}, map[string]any{"squash": false, "should_remove_source_branch": false}},
+		{MergeOptions{Method: "squash", DeleteBranch: new(true)}, map[string]any{"squash": true, "should_remove_source_branch": true}},
+	} {
+		f, info := fakeGitLab(t)
+		f.handle("PUT /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5/merge", func(w http.ResponseWriter, r *http.Request) {
+			if got := decodeJSON(t, r); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("%+v: payload = %v, want %v", tc.opts, got, tc.want)
+			}
+			writeJSON(w, http.StatusOK, strings.Replace(gitlabMR5, `"state":"opened"`, `"state":"merged","merged_at":"2026-10-03T10:00:00Z"`, 1))
+		})
+		d, err := ProviderGitLab.PrMerge(t.Context(), info, 5, tc.opts)
+		if err != nil || !d.Merged {
+			t.Errorf("%+v: got %+v, %v", tc.opts, d, err)
+		}
+	}
+}
+
+func TestGitLabPrMergeRebaseUnsupported(t *testing.T) {
+	_, info := fakeGitLab(t)
+	_, err := ProviderGitLab.PrMerge(t.Context(), info, 5, MergeOptions{Method: "rebase"})
+	if _, ok := err.(*InvalidArgumentError); !ok {
+		t.Errorf("err = %v, want invalid argument", err)
 	}
 }

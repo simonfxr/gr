@@ -47,6 +47,19 @@ Every command that operates on a single PR accepts:
 `view`, `browse`, `merge`, `close` and `checkout` also take the PR as a
 positional argument (`gr pr view 42`).
 
+### Merging
+
+```bash
+gr pr merge --method squash --delete-branch
+```
+
+`--method` is `merge`, `squash` or `rebase` (rebase and fast-forward, no merge
+commit); without it the repository's default applies. GitLab has no per-merge
+rebase: its project setting decides between merge commits and fast-forward.
+`--delete-branch`/`--keep-branch` override the PR's own setting (PRs created by
+`gr pr create` are set to delete their branch). A merge that Bitbucket queues
+is reported as not merged yet.
+
 ### Text input
 
 `addcomment`, `reply` and `addtask` take their text as an argument or via

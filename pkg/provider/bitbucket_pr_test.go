@@ -78,7 +78,7 @@ func TestBitbucketPrMergeAndClose(t *testing.T) {
 		}
 		writeJSON(w, http.StatusOK, merged)
 	})
-	d, err := ProviderBitbucket.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: true})
+	d, err := ProviderBitbucket.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: new(true)})
 	if err != nil || !d.Merged || d.State != "merged" {
 		t.Errorf("merge = %+v, %v", d, err)
 	}
@@ -168,5 +168,29 @@ func TestBitbucketBranchRenameRetargetsPRs(t *testing.T) {
 	}
 	if !f.called("PUT /repositories/workspace/repo/pullrequests/1") || !f.called("DELETE /repositories/workspace/repo/refs/branches/old") {
 		t.Error("PR not retargeted or old branch not deleted")
+	}
+}
+
+func TestBitbucketPrMergeOptions(t *testing.T) {
+	for _, tc := range []struct {
+		opts MergeOptions
+		want map[string]any
+	}{
+		// Unset options fall back to the PR's close_source_branch setting.
+		{MergeOptions{}, map[string]any{}},
+		{MergeOptions{Method: "merge", DeleteBranch: new(false)}, map[string]any{"merge_strategy": "merge_commit", "close_source_branch": false}},
+		{MergeOptions{Method: "squash"}, map[string]any{"merge_strategy": "squash"}},
+		{MergeOptions{Method: "rebase"}, map[string]any{"merge_strategy": "rebase_fast_forward"}},
+	} {
+		f, info := fakeBitbucketAPI(t)
+		f.handle("POST /repositories/workspace/repo/pullrequests/7/merge", func(w http.ResponseWriter, r *http.Request) {
+			if got := decodeJSON(t, r); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("%+v: payload = %v, want %v", tc.opts, got, tc.want)
+			}
+			writeJSON(w, http.StatusOK, strings.Replace(bitbucketPR7, `"OPEN"`, `"MERGED"`, 1))
+		})
+		if _, err := ProviderBitbucket.PrMerge(t.Context(), info, 7, tc.opts); err != nil {
+			t.Error(err)
+		}
 	}
 }

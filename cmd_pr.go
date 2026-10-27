@@ -154,14 +154,18 @@ func prBrowse(ctx context.Context, info *provider.Info, cmd *PRBrowseCmd) error 
 }
 
 func prMerge(ctx context.Context, info *provider.Info, cmd *PRMergeCmd) error {
+	opts := provider.MergeOptions{Method: cmd.Method}
+	switch {
+	case cmd.DeleteBranch && cmd.KeepBranch:
+		return usageErrorf("--delete-branch and --keep-branch are mutually exclusive")
+	case cmd.DeleteBranch || cmd.KeepBranch:
+		opts.DeleteBranch = &cmd.DeleteBranch
+	}
 	number, err := resolvePR(ctx, info, cmd.PR, cmd.PRSelector)
 	if err != nil {
 		return err
 	}
-	res, err := info.Provider.PrMerge(ctx, info, number, provider.MergeOptions{
-		Method:       cmd.Method,
-		DeleteBranch: cmd.DeleteBranch,
-	})
+	res, err := info.Provider.PrMerge(ctx, info, number, opts)
 	if res == nil {
 		return err
 	}
@@ -170,12 +174,10 @@ func prMerge(ctx context.Context, info *provider.Info, cmd *PRMergeCmd) error {
 		if jerr := printJSON(res); jerr != nil {
 			return jerr
 		}
+	} else if res.Merged {
+		fmt.Printf("PR #%d merged.\n", number)
 	} else {
-		state := "merged"
-		if res.State != "" {
-			state = res.State
-		}
-		fmt.Printf("PR #%d %s.\n", number, state)
+		fmt.Printf("PR #%d is not merged yet (state: %s); the merge may be queued or still running.\n", number, res.State)
 	}
 	return err
 }

@@ -83,7 +83,7 @@ func TestGitHubPrMergeDeletesBranch(t *testing.T) {
 			f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, pr)
 			f.reply("PUT /api/v3/repos/owner/repo/pulls/7/merge", http.StatusOK, `{"merged":true}`)
 			f.reply("DELETE "+tc.deletePath, http.StatusNoContent, ``)
-			if _, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: true}); err != nil {
+			if _, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: new(true)}); err != nil {
 				t.Fatal(err)
 			}
 			if !f.called("DELETE " + tc.deletePath) {
@@ -98,7 +98,7 @@ func TestGitHubPrMergeReportsFailedBranchDeletion(t *testing.T) {
 	f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, githubPR7)
 	f.reply("PUT /api/v3/repos/owner/repo/pulls/7/merge", http.StatusOK, `{"merged":true}`)
 	f.reply("DELETE /api/v3/repos/owner/repo/git/refs/heads/feature/x", http.StatusUnprocessableEntity, `{"message":"Reference does not exist"}`)
-	d, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: true})
+	d, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: new(true)})
 	if d == nil || err == nil || !strings.Contains(err.Error(), "merged, but deleting branch") {
 		t.Errorf("got %v, %v", d, err)
 	}
@@ -110,5 +110,33 @@ func TestGitHubPrMergeKeepsBranchByDefault(t *testing.T) {
 	f.reply("PUT /api/v3/repos/owner/repo/pulls/7/merge", http.StatusOK, `{"merged":true}`)
 	if _, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGitHubPrMergeMethod(t *testing.T) {
+	for _, method := range []string{"", "merge", "Squash", "rebase"} {
+		t.Run(method, func(t *testing.T) {
+			f, info := fakeGitHub(t)
+			f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, githubPR7)
+			f.handle("PUT /api/v3/repos/owner/repo/pulls/7/merge", func(w http.ResponseWriter, r *http.Request) {
+				got, _ := decodeJSON(t, r)["merge_method"].(string)
+				if want := strings.ToLower(method); got != want {
+					t.Errorf("merge_method = %q, want %q", got, want)
+				}
+				writeJSON(w, http.StatusOK, `{"merged":true}`)
+			})
+			if _, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{Method: method}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestPrMergeRejectsUnknownMethod(t *testing.T) {
+	for _, p := range []Provider{ProviderGitHub, ProviderGitLab, ProviderBitbucket} {
+		_, err := p.PrMerge(t.Context(), &Info{Provider: p}, 7, MergeOptions{Method: "fast-forward"})
+		if _, ok := err.(*InvalidArgumentError); !ok {
+			t.Errorf("%s: err = %v, want invalid argument", p, err)
+		}
 	}
 }

@@ -84,8 +84,9 @@ type PRCheckoutCmd struct {
 type PRMergeCmd struct {
 	PR string `arg:"positional" help:"pull request number or URL"`
 	PRSelector
-	Method       string `arg:"--method" help:"merge method: merge|squash|rebase"`
-	DeleteBranch bool   `arg:"--delete-branch" help:"delete source branch after merge"`
+	Method       string `arg:"--method" help:"merge method: merge, squash or rebase (default: the repository's; GitLab: no rebase)"`
+	DeleteBranch bool   `arg:"--delete-branch" help:"delete the source branch after merging"`
+	KeepBranch   bool   `arg:"--keep-branch" help:"keep the source branch, even if the PR is set to delete it"`
 	JSON         bool   `arg:"--json" help:"output as JSON"`
 }
 

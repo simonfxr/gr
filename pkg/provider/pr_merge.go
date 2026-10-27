@@ -13,8 +13,12 @@ import (
 
 // MergeOptions controls how a PR/MR is merged.
 type MergeOptions struct {
-	Method       string // merge|squash|rebase (provider support varies)
-	DeleteBranch bool
+	// Method is merge, squash or rebase; empty uses the provider's or
+	// repository's default. GitLab does not support rebase.
+	Method string
+	// DeleteBranch deletes (true) or keeps (false) the source branch; nil
+	// leaves it to the PR's or repository's setting.
+	DeleteBranch *bool
 }
 
 // PrMerge merges a pull/merge request across supported providers. If the
@@ -23,6 +27,12 @@ type MergeOptions struct {
 func (p Provider) PrMerge(ctx context.Context, nfo *Info, number int, opts MergeOptions) (*PRDetails, error) {
 	if nfo == nil {
 		return nil, errors.New("missing repo info")
+	}
+	opts.Method = strings.ToLower(strings.TrimSpace(opts.Method))
+	switch opts.Method {
+	case "", "merge", "squash", "rebase":
+	default:
+		return nil, invalidArgf("invalid merge method %q (want merge, squash or rebase)", opts.Method)
 	}
 	switch p {
 	case ProviderGitHub:
@@ -46,19 +56,9 @@ func prMergeGitHub(ctx context.Context, nfo *Info, number int, opts MergeOptions
 	if err != nil {
 		return nil, err
 	}
-	method := strings.ToLower(strings.TrimSpace(opts.Method))
-	switch method {
-	case "merge", "squash", "rebase":
-		// ok
-	case "":
-		method = ""
-	default:
-		// ignore invalid method; let server default
-		method = ""
-	}
 	var mergeOpts *githublib.PullRequestOptions
-	if method != "" {
-		mergeOpts = &githublib.PullRequestOptions{MergeMethod: method}
+	if opts.Method != "" {
+		mergeOpts = &githublib.PullRequestOptions{MergeMethod: opts.Method}
 	}
 	_, _, err = gh.PullRequests.Merge(ctx, nfo.Owner, nfo.Repo, number, "", mergeOpts)
 	if err != nil {
@@ -68,7 +68,7 @@ func prMergeGitHub(ctx context.Context, nfo *Info, number int, opts MergeOptions
 	if err != nil {
 		return nil, err
 	}
-	if opts.DeleteBranch {
+	if opts.DeleteBranch != nil && *opts.DeleteBranch {
 		// Unlike GitLab and Bitbucket, GitHub's merge API cannot delete the
 		// head branch. Delete it in the repository it lives in (maybe a fork).
 		head := pr.GetHead()
@@ -88,20 +88,28 @@ func prMergeGitLab(ctx context.Context, nfo *Info, number int, opts MergeOptions
 	if err != nil {
 		return nil, err
 	}
-	project := gitlabProject(nfo)
-	squash := false
-	if strings.EqualFold(strings.TrimSpace(opts.Method), "squash") {
-		squash = true
+	accept := &gitlab.AcceptMergeRequestOptions{ShouldRemoveSourceBranch: opts.DeleteBranch}
+	switch opts.Method {
+	case "merge":
+		accept.Squash = new(false)
+	case "squash":
+		accept.Squash = new(true)
+	case "rebase":
+		// Fast-forward vs. merge commit is a project setting on GitLab.
+		return nil, invalidArgf("GitLab does not support --method rebase; the project's merge method applies (use merge or squash)")
 	}
-	_, _, err = gl.MergeRequests.AcceptMergeRequest(project, int64(number), &gitlab.AcceptMergeRequestOptions{
-		Squash:                   new(squash),
-		ShouldRemoveSourceBranch: new(opts.DeleteBranch),
-	})
+	mr, _, err := gl.MergeRequests.AcceptMergeRequest(gitlabProject(nfo), int64(number), accept)
 	if err != nil {
 		return nil, err
 	}
-	// Return updated view
-	return prViewGitLab(ctx, nfo, number)
+	return gitlabPRDetails(&mr.BasicMergeRequest), nil
+}
+
+// bitbucketMergeStrategies maps gr merge methods to Bitbucket merge strategies.
+var bitbucketMergeStrategies = map[string]string{
+	"merge":  "merge_commit",
+	"squash": "squash",
+	"rebase": "rebase_fast_forward",
 }
 
 func prMergeBitbucket(ctx context.Context, nfo *Info, number int, opts MergeOptions) (*PRDetails, error) {
@@ -109,7 +117,13 @@ func prMergeBitbucket(ctx context.Context, nfo *Info, number int, opts MergeOpti
 	if err != nil {
 		return nil, err
 	}
-	payload := map[string]any{"close_source_branch": opts.DeleteBranch}
+	payload := map[string]any{}
+	if opts.DeleteBranch != nil {
+		payload["close_source_branch"] = *opts.DeleteBranch
+	}
+	if opts.Method != "" {
+		payload["merge_strategy"] = bitbucketMergeStrategies[opts.Method]
+	}
 	var pr bitbucketPR
 	status, err := bb.call(ctx, http.MethodPost, bitbucketPREndpoint(nfo, number)+"/merge", payload, &pr)
 	if err != nil {
