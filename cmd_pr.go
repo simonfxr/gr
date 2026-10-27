@@ -391,12 +391,12 @@ func runPR(cmd *PRCmd, info *provider.Info) {
 				return
 			}
 		}
-		err := info.Provider.PrReplyComment(ctx, info, prNumber, cmd.Reply.CommentID, cmd.Reply.Body)
+		reply, err := info.Provider.PrReplyComment(ctx, info, prNumber, cmd.Reply.CommentID, cmd.Reply.Body)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return
 		}
-		fmt.Printf("Reply added to comment %d on PR #%d\n", cmd.Reply.CommentID, prNumber)
+		fmt.Printf("Reply %d added to comment %d on PR #%d\n", reply.ID, cmd.Reply.CommentID, prNumber)
 	case cmd.Resolve != nil:
 		if info == nil {
 			fmt.Println("Cannot detect provider/repo info; aborting")

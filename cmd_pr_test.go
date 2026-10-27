@@ -17,7 +17,7 @@ import (
 
 func TestPRCommentsResolutionOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repositories/workspace/repo/pullrequests/42/comments/" {
+		if strings.TrimSuffix(r.URL.Path, "/") != "/repositories/workspace/repo/pullrequests/42/comments" {
 			t.Errorf("unexpected request path: %s", r.URL.Path)
 			http.NotFound(w, r)
 			return

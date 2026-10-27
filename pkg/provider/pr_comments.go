@@ -2,12 +2,14 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
-	bitbucket "github.com/ktrysmt/go-bitbucket"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
@@ -22,6 +24,8 @@ type PRComment struct {
 	Path string `json:"path,omitempty"`
 	Line int    `json:"line,omitempty"`
 	URL  string `json:"url,omitempty"`
+	// ParentID is set for replies.
+	ParentID int `json:"parent_id,omitempty"`
 }
 
 // PrComments lists review comments for a PR number on GitLab or Bitbucket.
@@ -100,83 +104,91 @@ func prCommentsGitLab(ctx context.Context, nfo *Info, number int) ([]PRComment, 
 }
 
 func prCommentsBitbucket(ctx context.Context, nfo *Info, number int) ([]PRComment, error) {
-	bb, err := bitbucketClient(nfo)
+	bb, err := newBitbucketAPIClient(nfo)
 	if err != nil {
 		return nil, err
 	}
-	_ = ctx
-	po := &bitbucket.PullRequestsOptions{
-		Owner:    nfo.Owner,
-		RepoSlug: nfo.Repo,
-		ID:       fmt.Sprintf("%d", number),
-	}
-	res, err := bb.Repositories.PullRequests.GetComments(po)
+	endpoint := bitbucketPREndpoint(nfo, number) + "/comments"
+	out := []PRComment{}
+	err = bitbucketListPages(ctx, bb, endpoint, url.Values{}, func(c bitbucketComment) bool {
+		if !c.Deleted {
+			out = append(out, c.toPRComment())
+		}
+		return true
+	})
 	if err != nil {
 		return nil, err
-	}
-	m, ok := res.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("unexpected response from bitbucket")
-	}
-	vals, _ := m["values"].([]any)
-	var out []PRComment
-	for _, v := range vals {
-		c, _ := v.(map[string]any)
-		if c == nil {
-			continue
-		}
-		// Skip deleted comments
-		if deleted, _ := c["deleted"].(bool); deleted {
-			continue
-		}
-		id := 0
-		if fid, ok := c["id"].(float64); ok {
-			id = int(fid)
-		}
-		body := ""
-		if content, ok := c["content"].(map[string]any); ok {
-			body, _ = content["raw"].(string)
-		}
-		author := ""
-		if user, ok := c["user"].(map[string]any); ok {
-			if n, ok := user["nickname"].(string); ok && n != "" {
-				author = n
-			} else if d, ok := user["display_name"].(string); ok {
-				author = d
-			}
-		}
-		createdStr, _ := c["created_on"].(string)
-		created, _ := time.Parse(time.RFC3339, createdStr)
-		// Inline location
-		var path string
-		var line int
-		if inline, ok := c["inline"].(map[string]any); ok {
-			path, _ = inline["path"].(string)
-			if l, ok := inline["to"].(float64); ok && l > 0 {
-				line = int(l)
-			} else if l, ok := inline["from"].(float64); ok && l > 0 {
-				line = int(l)
-			}
-		}
-		// URL
-		url := ""
-		if links, ok := c["links"].(map[string]any); ok {
-			if html, ok := links["html"].(map[string]any); ok {
-				url, _ = html["href"].(string)
-			}
-		}
-		// Bitbucket includes a resolution object only when the comment is resolved.
-		resolution, _ := c["resolution"].(map[string]any)
-		out = append(out, PRComment{
-			ID:        id,
-			Author:    author,
-			Body:      body,
-			CreatedAt: created,
-			Resolved:  resolution != nil,
-			Path:      path,
-			Line:      line,
-			URL:       url,
-		})
 	}
 	return out, nil
+}
+
+// bitbucketUser is a Bitbucket account reference; name prefers the nickname.
+type bitbucketUser struct {
+	Nickname    string `json:"nickname"`
+	DisplayName string `json:"display_name"`
+}
+
+func (u *bitbucketUser) name() string {
+	if u == nil {
+		return ""
+	}
+	if u.Nickname != "" {
+		return u.Nickname
+	}
+	return u.DisplayName
+}
+
+// bitbucketComment is the subset of a Bitbucket PR comment that gr uses.
+type bitbucketComment struct {
+	ID      int `json:"id"`
+	Content struct {
+		Raw string `json:"raw"`
+	} `json:"content"`
+	User      *bitbucketUser `json:"user"`
+	CreatedOn string         `json:"created_on"`
+	Deleted   bool           `json:"deleted"`
+	Inline    *struct {
+		Path string `json:"path"`
+		From int    `json:"from"`
+		To   int    `json:"to"`
+	} `json:"inline"`
+	Parent *struct {
+		ID int `json:"id"`
+	} `json:"parent"`
+	// Bitbucket includes a resolution object only when the comment is resolved.
+	Resolution json.RawMessage `json:"resolution"`
+	Links      struct {
+		HTML struct {
+			Href string `json:"href"`
+		} `json:"html"`
+	} `json:"links"`
+}
+
+func (c *bitbucketComment) toPRComment() PRComment {
+	out := PRComment{
+		ID:       c.ID,
+		Author:   c.User.name(),
+		Body:     c.Content.Raw,
+		Resolved: len(c.Resolution) > 0 && string(c.Resolution) != "null",
+		URL:      c.Links.HTML.Href,
+	}
+	out.CreatedAt, _ = time.Parse(time.RFC3339, c.CreatedOn)
+	if c.Inline != nil {
+		out.Path = c.Inline.Path
+		if c.Inline.To > 0 {
+			out.Line = c.Inline.To
+		} else if c.Inline.From > 0 {
+			out.Line = c.Inline.From
+		}
+	}
+	if c.Parent != nil {
+		out.ParentID = c.Parent.ID
+	}
+	return out
+}
+
+// bitbucketPREndpoint returns the path-escaped API path of a pull request.
+func bitbucketPREndpoint(nfo *Info, number int) string {
+	return "repositories/" + url.PathEscape(nfo.Owner) + "/" + url.PathEscape(nfo.Repo) +
+		"/pullrequests/" + strconv.Itoa(number)
 }
