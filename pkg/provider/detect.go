@@ -327,7 +327,7 @@ func detectService(host string, port int) (service Provider, variant, evidence, 
 		return ProviderGitHub, "cloud", "url-heuristic", ""
 	case "gitlab.com":
 		return ProviderGitLab, "cloud", "url-heuristic", ""
-	case "bitbucket.org":
+	case "bitbucket.org", "ssh.bitbucket.org":
 		return ProviderBitbucket, "cloud", "url-heuristic", ""
 	}
 
