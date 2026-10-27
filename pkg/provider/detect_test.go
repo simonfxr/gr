@@ -1,7 +1,10 @@
 package provider
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -14,6 +17,10 @@ import (
 
 // detectRemote runs provider detection for a repository whose origin is remote.
 func detectRemote(t *testing.T, remote string, cfg *config.Config) (*Info, error) {
+	return detectRemoteCtx(t, t.Context(), remote, cfg)
+}
+
+func detectRemoteCtx(t *testing.T, ctx context.Context, remote string, cfg *config.Config) (*Info, error) {
 	t.Helper()
 	repo, err := git.Init(memory.NewStorage(), nil)
 	if err != nil {
@@ -22,7 +29,7 @@ func detectRemote(t *testing.T, remote string, cfg *config.Config) (*Info, error
 	if _, err := repo.CreateRemote(&gitconfig.RemoteConfig{Name: "origin", URLs: []string{remote}}); err != nil {
 		t.Fatal(err)
 	}
-	return DetectFromRepo(&LocalRepo{GitRepo: repo}, cfg)
+	return DetectFromRepo(ctx, &LocalRepo{GitRepo: repo}, cfg)
 }
 
 func TestDetectConfiguredHost(t *testing.T) {
@@ -132,5 +139,22 @@ func TestIsSSHRemote(t *testing.T) {
 		if got := isSSHRemote(remote); got != want {
 			t.Errorf("isSSHRemote(%q) = %v", remote, got)
 		}
+	}
+}
+
+// TestDetectionHonorsContext stops probing an unknown host once the context
+// is canceled.
+func TestDetectionHonorsContext(t *testing.T) {
+	probed := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { probed = true }))
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := detectRemoteCtx(t, ctx, strings.Replace(srv.URL, "http://", "http://u@", 1)+"/owner/repo.git", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if probed {
+		t.Error("probed despite canceled context")
 	}
 }

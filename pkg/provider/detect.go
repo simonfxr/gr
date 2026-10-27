@@ -53,7 +53,8 @@ type Info struct {
 // DetectFromRepo infers provider and repo info for an already detected local repository
 // by inspecting remotes (preferring origin, then upstream, then first). It also
 // performs light network probing (like the Python reference) to identify self-hosted services.
-func DetectFromRepo(localRepo *LocalRepo, cfg *config.Config) (*Info, error) {
+// Canceling ctx stops probing.
+func DetectFromRepo(ctx context.Context, localRepo *LocalRepo, cfg *config.Config) (*Info, error) {
 	if localRepo == nil || localRepo.GitRepo == nil {
 		return nil, fmt.Errorf("local repo not available")
 	}
@@ -103,7 +104,10 @@ func DetectFromRepo(localRepo *LocalRepo, cfg *config.Config) (*Info, error) {
 		// The port of an SSH remote is the SSH daemon's, not the web server's.
 		port = 0
 	}
-	info.Provider, info.Variant, info.Evidence, info.HTTPBase = detectService(host, port)
+	info.Provider, info.Variant, info.Evidence, info.HTTPBase = detectService(ctx, host, port)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return info, nil
 }
 
@@ -360,8 +364,11 @@ func hostOnly(h string) string {
 
 var httpClient = &http.Client{Timeout: 2500 * time.Millisecond}
 
-func httpGet(url string) (code int, headers map[string]string, body []byte) {
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+func httpGet(ctx context.Context, url string) (code int, headers map[string]string, body []byte) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, map[string]string{}, nil
+	}
 	req.Header.Set("User-Agent", "git-remote-prober/0.1")
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -402,7 +409,7 @@ func (p Provider) String() string {
 	}
 }
 
-func detectService(host string, port int) (service Provider, variant, evidence, httpBase string) {
+func detectService(ctx context.Context, host string, port int) (service Provider, variant, evidence, httpBase string) {
 	if host == "" {
 		return ProviderUnknown, "unknown", "none", ""
 	}
@@ -421,23 +428,26 @@ func detectService(host string, port int) (service Provider, variant, evidence, 
 	}
 
 	for _, base := range hostsToTry {
-		if ok, ev := probeGitLab(base); ok {
+		if ok, ev := probeGitLab(ctx, base); ok {
 			return ProviderGitLab, "self-hosted", ev, base
 		}
-		if ok, ev := probeGitHubEnterprise(base); ok {
+		if ok, ev := probeGitHubEnterprise(ctx, base); ok {
 			return ProviderGitHub, "self-hosted", ev, base
 		}
-		if ok, ev := probeBitbucketServer(base); ok {
+		if ok, ev := probeBitbucketServer(ctx, base); ok {
 			return ProviderBitbucket, "self-hosted", ev, base
+		}
+		if ctx.Err() != nil {
+			break
 		}
 	}
 
 	return ProviderUnknown, "unknown", "probe-failed", ""
 }
 
-func probeGitLab(base string) (bool, string) {
+func probeGitLab(ctx context.Context, base string) (bool, string) {
 	// /api/v4/version preferred
-	code, headers, body := httpGet(base + "/api/v4/version")
+	code, headers, body := httpGet(ctx, base+"/api/v4/version")
 	if code == 200 && len(body) > 0 {
 		var data map[string]any
 		if json.Unmarshal(body, &data) == nil {
@@ -465,8 +475,8 @@ func probeGitLab(base string) (bool, string) {
 	return false, ""
 }
 
-func probeGitHubEnterprise(base string) (bool, string) {
-	code, headers, body := httpGet(base + "/api/v3/meta")
+func probeGitHubEnterprise(ctx context.Context, base string) (bool, string) {
+	code, headers, body := httpGet(ctx, base+"/api/v3/meta")
 	gheVer := headers["x-github-enterprise-version"]
 	if code == 200 && len(body) > 0 {
 		var data map[string]any
@@ -476,7 +486,7 @@ func probeGitHubEnterprise(base string) (bool, string) {
 			}
 		}
 	}
-	code, headers, body = httpGet(base + "/api/v3")
+	code, headers, body = httpGet(ctx, base+"/api/v3")
 	gheVer = headers["x-github-enterprise-version"]
 	if code == 200 && len(body) > 0 {
 		var data map[string]any
@@ -489,10 +499,10 @@ func probeGitHubEnterprise(base string) (bool, string) {
 	return false, ""
 }
 
-func probeBitbucketServer(base string) (bool, string) {
+func probeBitbucketServer(ctx context.Context, base string) (bool, string) {
 	paths := []string{"/rest/api/latest/application-properties", "/rest/api/1.0/application-properties"}
 	for _, p := range paths {
-		code, headers, body := httpGet(base + p)
+		code, headers, body := httpGet(ctx, base+p)
 		if code == 200 && len(body) > 0 {
 			var data map[string]any
 			if json.Unmarshal(body, &data) == nil {

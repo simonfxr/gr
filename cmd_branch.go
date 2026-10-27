@@ -20,7 +20,7 @@ func runBranch(ctx context.Context, cmd *BranchCmd) error {
 	case cmd.List != nil:
 		return branchList(ctx, cmd.List)
 	case cmd.Browse != nil:
-		return branchBrowse(cmd.Browse)
+		return branchBrowse(ctx, cmd.Browse)
 	default:
 		return usageErrorf("'gr branch' requires a subcommand. Try 'gr branch list'")
 	}
@@ -38,7 +38,7 @@ func branchRename(ctx context.Context, cmd *BranchRenameCmd) error {
 		fmt.Printf("Renamed local branch %q -> %q.\n", cmd.Old, cmd.New)
 		return nil
 	}
-	info, err := detectProvider()
+	info, err := detectProvider(ctx)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func branchDelete(ctx context.Context, d *BranchDeleteCmd) error {
 		fmt.Printf("Deleted local branch %q.\n", d.Name)
 		return nil
 	}
-	info, err := detectProvider()
+	info, err := detectProvider(ctx)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func branchDelete(ctx context.Context, d *BranchDeleteCmd) error {
 }
 
 func branchList(ctx context.Context, l *BranchListCmd) error {
-	info, err := detectProvider()
+	info, err := detectProvider(ctx)
 	if err != nil {
 		return err
 	}
@@ -125,8 +125,8 @@ func branchList(ctx context.Context, l *BranchListCmd) error {
 	return nil
 }
 
-func branchBrowse(cmd *BranchBrowseCmd) error {
-	info, err := detectProvider()
+func branchBrowse(ctx context.Context, cmd *BranchBrowseCmd) error {
+	info, err := detectProvider(ctx)
 	if err != nil {
 		return err
 	}

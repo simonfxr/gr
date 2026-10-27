@@ -235,10 +235,22 @@ var detectLocal = lazy(func() (*provider.LocalRepo, error) {
 	return local, nil
 })
 
+// lazyCtx is like lazy for computations that take a context; the first
+// caller's context is used.
+func lazyCtx[T any](f func(context.Context) (T, error)) func(context.Context) (T, error) {
+	once := sync.Once{}
+	var v T
+	var err error
+	return func(ctx context.Context) (T, error) {
+		once.Do(func() { v, err = f(ctx) })
+		return v, err
+	}
+}
+
 // detectProvider lazily resolves full provider/repo information based on the
 // already-detected local repository. This may inspect remotes and probe the
 // network for self-hosted instances. Used by PR commands and remote branch ops.
-var detectProvider = lazy(func() (*provider.Info, error) {
+var detectProvider = lazyCtx(func(ctx context.Context) (*provider.Info, error) {
 	local, err := detectLocal()
 	if err != nil {
 		return nil, err
@@ -247,7 +259,7 @@ var detectProvider = lazy(func() (*provider.Info, error) {
 	if err != nil {
 		return nil, err
 	}
-	info, err := provider.DetectFromRepo(local, cfg)
+	info, err := provider.DetectFromRepo(ctx, local, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("provider detection: %w", err)
 	}
@@ -279,7 +291,7 @@ func main() {
 func run(ctx context.Context, args *Args) error {
 	switch {
 	case args.PR != nil:
-		info, err := detectProvider()
+		info, err := detectProvider(ctx)
 		if err != nil {
 			return err
 		}
