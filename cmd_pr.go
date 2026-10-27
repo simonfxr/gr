@@ -27,6 +27,8 @@ func runPR(ctx context.Context, cmd *PRCmd, info *provider.Info) error {
 		return prCreate(ctx, info, cmd.Create)
 	case cmd.View != nil:
 		return prView(ctx, info, cmd.View)
+	case cmd.Checks != nil:
+		return prChecks(ctx, info, cmd.Checks)
 	case cmd.Browse != nil:
 		return prBrowse(ctx, info, cmd.Browse)
 	case cmd.Checkout != nil:

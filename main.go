@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/alexflint/go-arg"
 
@@ -26,6 +27,7 @@ type PRCmd struct {
 	List        *PRListCmd        `arg:"subcommand:list" help:"list pull requests"`
 	Create      *PRCreateCmd      `arg:"subcommand:create" help:"create a pull request"`
 	View        *PRViewCmd        `arg:"subcommand:view" help:"view a pull request"`
+	Checks      *PRChecksCmd      `arg:"subcommand:checks" help:"show the CI checks of a pull request"`
 	Browse      *PRBrowseCmd      `arg:"subcommand:browse" help:"open a pull request in the browser"`
 	Checkout    *PRCheckoutCmd    `arg:"subcommand:checkout" help:"checkout a pull request branch (not implemented yet)"`
 	Merge       *PRMergeCmd       `arg:"subcommand:merge" help:"merge a pull request"`
@@ -72,6 +74,15 @@ type PRViewCmd struct {
 	PR string `arg:"positional" help:"pull request number or URL"`
 	PRSelector
 	JSON bool `arg:"--json" help:"output as JSON"`
+}
+
+type PRChecksCmd struct {
+	PR string `arg:"positional" help:"pull request number or URL"`
+	PRSelector
+	Watch    bool          `arg:"--watch" help:"wait until no check is pending (and up to a minute for checks to appear)"`
+	Interval time.Duration `arg:"--interval" help:"polling interval for --watch" default:"10s"`
+	FailFast bool          `arg:"--fail-fast" help:"with --watch, stop as soon as a check fails"`
+	JSON     bool          `arg:"--json" help:"output as JSON"`
 }
 
 type PRBrowseCmd struct {
@@ -201,7 +212,8 @@ func (Args) Description() string {
 }
 
 func (Args) Epilogue() string {
-	return "Exit status: 0 success, 1 error, 2 invalid usage or unsupported by the provider, 3 pull request/comment/task not found or ambiguous, 4 missing or rejected credentials, 130 interrupted.\n" +
+	return "Exit status: 0 success, 1 error, 2 invalid usage or unsupported by the provider, 3 pull request/comment/task not found or ambiguous, 4 missing or rejected credentials, 130 interrupted; " +
+		"pr checks: 5 a check failed, 6 checks pending.\n" +
 		"With --json, errors are printed to stderr as JSON: {error, kind, exit_code, candidates}."
 }
 
@@ -283,7 +295,9 @@ func main() {
 		if interrupted {
 			err = &cliError{kind: kindInterrupted, msg: "interrupted"}
 		}
-		reportError(os.Stderr, err, wantsJSON(p.Subcommand()))
+		if !isSilent(err) {
+			reportError(os.Stderr, err, wantsJSON(p.Subcommand()))
+		}
 		os.Exit(exitCode(err))
 	}
 }

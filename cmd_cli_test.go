@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -495,5 +496,69 @@ func TestTodoOnGitLab(t *testing.T) {
 	if report.OpenTasks != 0 || report.UnresolvedComments != 1 || len(report.Items) != 1 ||
 		report.Items[0].ID != 1 || len(report.Items[0].Replies) != 1 {
 		t.Errorf("report = %+v", report)
+	}
+}
+
+// TestCLIChecks checks the exit status of pr checks and polling with --watch.
+func TestCLIChecks(t *testing.T) {
+	repo := newTestRepo(t, "git@bitbucket.org:workspace/repo.git")
+	var mu sync.Mutex
+	// PR -> build state per poll; the last one repeats.
+	states := map[string][]string{
+		"1": {"SUCCESSFUL"},
+		"2": {"FAILED"},
+		"3": {"INPROGRESS"},
+		"4": {"INPROGRESS", "INPROGRESS", "SUCCESSFUL"},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pr, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/repositories/workspace/repo/pullrequests/"), "/")
+		switch rest {
+		case "":
+			fmt.Fprintf(w, `{"id":%s,"state":"OPEN","source":{"branch":{"name":"feature/x"},"commit":{"hash":"abc"}}}`, pr)
+		case "statuses":
+			mu.Lock()
+			s := states[pr]
+			state := s[0]
+			if len(s) > 1 {
+				states[pr] = s[1:]
+			}
+			mu.Unlock()
+			fmt.Fprintf(w, `{"values":[{"key":"b","name":"build","state":%q,"links":{"commit":{"href":"x/commit/abcdef"}}}]}`, state)
+		default:
+			http.Error(w, `{"error":{"message":"not found"}}`, http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	for _, tc := range []struct {
+		args  string
+		code  int
+		state string // JSON state
+	}{
+		{"pr checks 1 --json", 0, "pass"},
+		{"pr checks 2 --json", exitChecksFailed, "fail"},
+		{"pr checks 3 --json", exitChecksPending, "pending"},
+		{"pr checks 4 --watch --interval 10ms --json", 0, "pass"},
+		{"pr checks 3 --fail-fast", exitUsage, ""},
+	} {
+		stdout, stderr, code := runGR(t, repo, server.URL, tc.args)
+		if code != tc.code {
+			t.Errorf("gr %s: exit %d, want %d\nstdout: %s\nstderr: %s", tc.args, code, tc.code, stdout, stderr)
+			continue
+		}
+		if tc.state == "" {
+			continue
+		}
+		var report provider.ChecksReport
+		if err := json.Unmarshal([]byte(stdout), &report); err != nil || report.State != tc.state {
+			t.Errorf("gr %s: stdout = %s, want state %s", tc.args, stdout, tc.state)
+		}
+		if strings.Contains(tc.args, "--watch") {
+			if !strings.Contains(stderr, "PR #4: waiting: 1 pending") {
+				t.Errorf("gr %s: stderr = %q, want progress", tc.args, stderr)
+			}
+		} else if stderr != "" {
+			t.Errorf("gr %s: stderr = %q, want none", tc.args, stderr)
+		}
 	}
 }

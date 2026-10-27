@@ -14,6 +14,7 @@ go install github.com/simonfxr/gr@latest
 gr pr list              # List pull requests
 gr pr create            # Create a pull request
 gr pr view [PR]         # View PR details
+gr pr checks [PR]       # CI checks (--watch to wait for them)
 gr pr merge [PR]        # Merge a PR
 gr pr close [PR]        # Close a PR
 gr pr browse [PR]       # Open PR in browser
@@ -44,8 +45,8 @@ Every command that operates on a single PR accepts:
 - `-b/--branch BRANCH` to use the open PR of that branch.
 - Neither: the open PR of the current branch.
 
-`view`, `browse`, `merge`, `close` and `checkout` also take the PR as a
-positional argument (`gr pr view 42`).
+`view`, `checks`, `browse`, `merge`, `close` and `checkout` also take the PR
+as a positional argument (`gr pr view 42`).
 
 ### Merging
 
@@ -63,6 +64,26 @@ counts as deleted. On GitHub, `--keep-branch` cannot stop the repository's
 "Automatically delete head branches" setting. A merge that Bitbucket queues
 is reported as not merged yet. `gr pr close --delete-branch` deletes the
 source branch the same way.
+
+### CI checks
+
+```bash
+gr pr checks                    # checks of the current branch's PR
+gr pr checks 42 --watch         # wait until no check is pending
+gr pr checks --watch --fail-fast --json
+```
+
+Lists the checks of the PR's head commit: GitHub check runs (e.g. Actions) and
+commit statuses, the jobs of the GitLab MR's head pipeline, or Bitbucket build
+statuses. Each check has a `state` (`pass`, `fail`, `pending`, `skipped`,
+`cancelled`), the provider's own `provider_state`, and a `url`. GitLab jobs
+that are allowed to fail are `optional`, and manual jobs count as `skipped`.
+
+The exit status tells the result: `0` all passed (or no checks), `5` a check
+failed or was cancelled, `6` checks are still pending. `--watch` polls every
+`--interval` (default `10s`) until no check is pending, waiting up to a minute
+for checks to appear after a push; `--fail-fast` stops at the first failure.
+Progress goes to stderr.
 
 ### Renaming branches
 
@@ -97,6 +118,7 @@ MSG
   provider does not support (e.g. tasks outside Bitbucket), `3` PR/comment/task
   not found or PR selection ambiguous, `4` missing or rejected credentials,
   `130` interrupted (Ctrl-C cancels in-flight requests). Empty listings exit `0`.
+  `pr checks` exits `5` if a check failed and `6` if checks are pending.
 - **JSON:** `--json` is available on every command that produces data; field
   names are snake_case. With `--json`, errors are written to stderr as
   `{"error": "...", "kind": "usage|unsupported|not_found|ambiguous|auth|interrupted|error", "exit_code": N}`;

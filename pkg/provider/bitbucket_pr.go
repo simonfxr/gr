@@ -37,6 +37,9 @@ type bitbucketPRRef struct {
 	Branch struct {
 		Name string `json:"name"`
 	} `json:"branch"`
+	Commit struct {
+		Hash string `json:"hash"` // abbreviated
+	} `json:"commit"`
 	Repository struct {
 		FullName string `json:"full_name"`
 	} `json:"repository"`

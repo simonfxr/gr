@@ -16,6 +16,9 @@ const (
 	exitUsage    = 2 // invalid or conflicting arguments
 	exitNotFound = 3 // PR (or comment/task) not found, or PR selection ambiguous
 	exitAuth     = 4 // credentials missing or rejected
+	// pr checks results
+	exitChecksFailed  = 5
+	exitChecksPending = 6
 	// exitInterrupted follows the shell convention 128+SIGINT.
 	exitInterrupted = 130
 )
@@ -49,6 +52,20 @@ func notFoundErrorf(format string, args ...any) error {
 	return &cliError{kind: kindNotFound, msg: fmt.Sprintf(format, args...)}
 }
 
+// exitStatus is a result reported by exit status alone, such as failing
+// checks: the command's output already says it, so no error is printed.
+type exitStatus struct {
+	code int
+	msg  string
+}
+
+func (e *exitStatus) Error() string { return e.msg }
+
+func isSilent(err error) bool {
+	_, ok := errors.AsType[*exitStatus](err)
+	return ok
+}
+
 func errorKind(err error) string {
 	if ce, ok := errors.AsType[*cliError](err); ok {
 		return ce.kind
@@ -69,6 +86,9 @@ func errorKind(err error) string {
 }
 
 func exitCode(err error) int {
+	if es, ok := errors.AsType[*exitStatus](err); ok {
+		return es.code
+	}
 	switch errorKind(err) {
 	case kindUsage, kindUnsupported:
 		return exitUsage
