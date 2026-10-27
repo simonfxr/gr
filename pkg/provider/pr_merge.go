@@ -17,7 +17,9 @@ type MergeOptions struct {
 	DeleteBranch bool
 }
 
-// PrMerge merges a pull/merge request across supported providers.
+// PrMerge merges a pull/merge request across supported providers. If the
+// merge succeeded but deleting the source branch failed, PrMerge returns the
+// merged PR together with an error.
 func (p Provider) PrMerge(ctx context.Context, nfo *Info, number int, opts MergeOptions) (*PRDetails, error) {
 	if nfo == nil {
 		return nil, errors.New("missing repo info")
@@ -40,7 +42,7 @@ func prMergeGitHub(ctx context.Context, nfo *Info, number int, opts MergeOptions
 		return nil, err
 	}
 	// Fetch PR to get head/base info for possible branch deletion
-	_, _, err = gh.PullRequests.Get(ctx, nfo.Owner, nfo.Repo, number)
+	pr, _, err := gh.PullRequests.Get(ctx, nfo.Owner, nfo.Repo, number)
 	if err != nil {
 		return nil, err
 	}
@@ -62,8 +64,23 @@ func prMergeGitHub(ctx context.Context, nfo *Info, number int, opts MergeOptions
 	if err != nil {
 		return nil, err
 	}
-	// Return updated view
-	return prViewGitHub(ctx, nfo, number)
+	d, err := prViewGitHub(ctx, nfo, number)
+	if err != nil {
+		return nil, err
+	}
+	if opts.DeleteBranch {
+		// Unlike GitLab and Bitbucket, GitHub's merge API cannot delete the
+		// head branch. Delete it in the repository it lives in (maybe a fork).
+		head := pr.GetHead()
+		owner, repo := head.GetRepo().GetOwner().GetLogin(), head.GetRepo().GetName()
+		if owner == "" || repo == "" {
+			return d, fmt.Errorf("PR #%d merged, but its head repository no longer exists; branch %q not deleted", number, head.GetRef())
+		}
+		if _, err := gh.Git.DeleteRef(ctx, owner, repo, "heads/"+head.GetRef()); err != nil {
+			return d, fmt.Errorf("PR #%d merged, but deleting branch %q failed: %w", number, head.GetRef(), err)
+		}
+	}
+	return d, nil
 }
 
 func prMergeGitLab(ctx context.Context, nfo *Info, number int, opts MergeOptions) (*PRDetails, error) {

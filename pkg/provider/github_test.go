@@ -3,14 +3,15 @@ package provider
 import (
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
 
 const githubPR7 = `{"number":7,"title":"Add x","body":"desc","state":"open","draft":true,
 	"user":{"login":"alice"},"created_at":"2026-10-01T10:00:00Z","updated_at":"2026-10-02T10:00:00Z",
-	"base":{"ref":"main","repo":{"full_name":"owner/repo"}},
-	"head":{"ref":"feature/x","repo":{"full_name":"owner/repo"}},
+	"base":{"ref":"main","repo":{"name":"repo","owner":{"login":"owner"}}},
+	"head":{"ref":"feature/x","repo":{"name":"repo","owner":{"login":"owner"}}},
 	"html_url":"https://github.example/owner/repo/pull/7"}`
 
 func TestGitHubPrView(t *testing.T) {
@@ -65,5 +66,49 @@ func TestGitHubPrListPaginatesAndFiltersAuthor(t *testing.T) {
 	}
 	if !reflect.DeepEqual(numbers, []int{1, 3}) {
 		t.Errorf("numbers = %v", numbers)
+	}
+}
+
+func TestGitHubPrMergeDeletesBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name, headRepo, deletePath string
+	}{
+		{"same repo", `{"name":"repo","owner":{"login":"owner"}}`, "/api/v3/repos/owner/repo/git/refs/heads/feature/x"},
+		{"fork", `{"name":"repo-fork","owner":{"login":"alice"}}`, "/api/v3/repos/alice/repo-fork/git/refs/heads/feature/x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, info := fakeGitHub(t)
+			pr := strings.Replace(githubPR7, `"head":{"ref":"feature/x","repo":{"name":"repo","owner":{"login":"owner"}}}`,
+				`"head":{"ref":"feature/x","repo":`+tc.headRepo+`}`, 1)
+			f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, pr)
+			f.reply("PUT /api/v3/repos/owner/repo/pulls/7/merge", http.StatusOK, `{"merged":true}`)
+			f.reply("DELETE "+tc.deletePath, http.StatusNoContent, ``)
+			if _, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: true}); err != nil {
+				t.Fatal(err)
+			}
+			if !f.called("DELETE " + tc.deletePath) {
+				t.Error("head branch not deleted")
+			}
+		})
+	}
+}
+
+func TestGitHubPrMergeReportsFailedBranchDeletion(t *testing.T) {
+	f, info := fakeGitHub(t)
+	f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, githubPR7)
+	f.reply("PUT /api/v3/repos/owner/repo/pulls/7/merge", http.StatusOK, `{"merged":true}`)
+	f.reply("DELETE /api/v3/repos/owner/repo/git/refs/heads/feature/x", http.StatusUnprocessableEntity, `{"message":"Reference does not exist"}`)
+	d, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{DeleteBranch: true})
+	if d == nil || err == nil || !strings.Contains(err.Error(), "merged, but deleting branch") {
+		t.Errorf("got %v, %v", d, err)
+	}
+}
+
+func TestGitHubPrMergeKeepsBranchByDefault(t *testing.T) {
+	f, info := fakeGitHub(t)
+	f.reply("GET /api/v3/repos/owner/repo/pulls/7", http.StatusOK, githubPR7)
+	f.reply("PUT /api/v3/repos/owner/repo/pulls/7/merge", http.StatusOK, `{"merged":true}`)
+	if _, err := ProviderGitHub.PrMerge(t.Context(), info, 7, MergeOptions{}); err != nil {
+		t.Fatal(err)
 	}
 }

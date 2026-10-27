@@ -162,18 +162,22 @@ func prMerge(ctx context.Context, info *provider.Info, cmd *PRMergeCmd) error {
 		Method:       cmd.Method,
 		DeleteBranch: cmd.DeleteBranch,
 	})
-	if err != nil {
+	if res == nil {
 		return err
 	}
+	// A non-nil result with an error means merged, but branch deletion failed.
 	if cmd.JSON {
-		return printJSON(res)
+		if jerr := printJSON(res); jerr != nil {
+			return jerr
+		}
+	} else {
+		state := "merged"
+		if res.State != "" {
+			state = res.State
+		}
+		fmt.Printf("PR #%d %s.\n", number, state)
 	}
-	state := "merged"
-	if res != nil && res.State != "" {
-		state = res.State
-	}
-	fmt.Printf("PR #%d %s.\n", number, state)
-	return nil
+	return err
 }
 
 func prClose(ctx context.Context, info *provider.Info, cmd *PRCloseCmd) error {
