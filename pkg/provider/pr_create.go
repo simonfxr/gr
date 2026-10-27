@@ -150,8 +150,9 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	return gitlabPRDetails(&mr.BasicMergeRequest), nil
 }
 
-// gitlabDraftTitle matches the title prefixes by which GitLab marks drafts.
-var gitlabDraftTitle = regexp.MustCompile(`(?i)^\s*(\[draft\]|\(draft\)|draft:|draft\s*-)`)
+// gitlabDraftTitle matches the title prefixes by which GitLab marks drafts
+// (Gitlab::Regex::MergeRequests#merge_request_draft).
+var gitlabDraftTitle = regexp.MustCompile(`(?i)^\s*(\[draft\]|\(draft\)|draft:)`)
 
 func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetails, error) {
 	bb, err := newBitbucketAPIClient(nfo)

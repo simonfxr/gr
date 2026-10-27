@@ -145,6 +145,7 @@ func TestGitLabPrCreateDraft(t *testing.T) {
 		{"Add y", true, "Draft: Add y"},
 		{"draft: Add y", true, "draft: Add y"},
 		{"[Draft] Add y", true, "[Draft] Add y"},
+		{"Draft - Add y", true, "Draft: Draft - Add y"}, // not a draft prefix for GitLab
 	} {
 		f, info := fakeGitLab(t)
 		f.handle("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests", func(w http.ResponseWriter, r *http.Request) {
