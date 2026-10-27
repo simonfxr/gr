@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"github.com/alexflint/go-arg"
 
@@ -198,7 +201,7 @@ func (Args) Description() string {
 }
 
 func (Args) Epilogue() string {
-	return "Exit status: 0 success, 1 error, 2 invalid usage, 3 pull request/comment/task not found or ambiguous.\n" +
+	return "Exit status: 0 success, 1 error, 2 invalid usage, 3 pull request/comment/task not found or ambiguous, 130 interrupted.\n" +
 		"With --json, errors are printed to stderr as JSON: {error, kind, exit_code, candidates}."
 }
 
@@ -255,22 +258,30 @@ func main() {
 	args := &Args{}
 	p := arg.MustParse(args)
 	chdir = args.Chdir
-	if err := run(args); err != nil {
+	// Ctrl-C (or SIGTERM) cancels in-flight API requests.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, args)
+	interrupted := ctx.Err() != nil
+	stop()
+	if err != nil {
+		if interrupted {
+			err = &cliError{kind: kindInterrupted, msg: "interrupted"}
+		}
 		reportError(os.Stderr, err, wantsJSON(p.Subcommand()))
 		os.Exit(exitCode(err))
 	}
 }
 
-func run(args *Args) error {
+func run(ctx context.Context, args *Args) error {
 	switch {
 	case args.PR != nil:
 		info, err := detectProvider()
 		if err != nil {
 			return err
 		}
-		return runPR(args.PR, info)
+		return runPR(ctx, args.PR, info)
 	case args.Branch != nil:
-		return runBranch(args.Branch)
+		return runBranch(ctx, args.Branch)
 	default:
 		return usageErrorf("no command provided. Try 'gr pr list' or 'gr --help'")
 	}

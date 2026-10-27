@@ -104,7 +104,7 @@ func branchListRemoteGitHub(ctx context.Context, nfo *Info, opts BranchListOptio
 }
 
 func branchListRemoteGitLab(ctx context.Context, nfo *Info, opts BranchListOptions) ([]BranchInfo, error) {
-	gl, err := gitlabClient(nfo)
+	gl, err := gitlabClient(ctx, nfo)
 	if err != nil {
 		return nil, err
 	}

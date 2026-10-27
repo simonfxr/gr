@@ -56,7 +56,7 @@ func prViewGitHub(ctx context.Context, nfo *Info, number int) (*PRDetails, error
 }
 
 func prViewGitLab(ctx context.Context, nfo *Info, number int) (*PRDetails, error) {
-	gl, err := gitlabClient(nfo)
+	gl, err := gitlabClient(ctx, nfo)
 	if err != nil {
 		return nil, err
 	}

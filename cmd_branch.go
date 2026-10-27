@@ -11,8 +11,7 @@ import (
 	"github.com/simonfxr/gr/tables"
 )
 
-func runBranch(cmd *BranchCmd) error {
-	ctx := context.Background()
+func runBranch(ctx context.Context, cmd *BranchCmd) error {
 	switch {
 	case cmd.Rename != nil:
 		return branchRename(ctx, cmd.Rename)

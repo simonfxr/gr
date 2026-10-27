@@ -84,7 +84,7 @@ func prMergeGitHub(ctx context.Context, nfo *Info, number int, opts MergeOptions
 }
 
 func prMergeGitLab(ctx context.Context, nfo *Info, number int, opts MergeOptions) (*PRDetails, error) {
-	gl, err := gitlabClient(nfo)
+	gl, err := gitlabClient(ctx, nfo)
 	if err != nil {
 		return nil, err
 	}

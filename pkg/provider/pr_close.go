@@ -41,7 +41,7 @@ func prCloseGitHub(ctx context.Context, nfo *Info, number int) (*PRDetails, erro
 }
 
 func prCloseGitLab(ctx context.Context, nfo *Info, number int) (*PRDetails, error) {
-	gl, err := gitlabClient(nfo)
+	gl, err := gitlabClient(ctx, nfo)
 	if err != nil {
 		return nil, err
 	}

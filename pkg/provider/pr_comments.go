@@ -45,7 +45,7 @@ func (p Provider) PrComments(ctx context.Context, nfo *Info, number int) ([]PRCo
 }
 
 func prCommentsGitLab(ctx context.Context, nfo *Info, number int) ([]PRComment, error) {
-	gl, err := gitlabClient(nfo)
+	gl, err := gitlabClient(ctx, nfo)
 	if err != nil {
 		return nil, err
 	}

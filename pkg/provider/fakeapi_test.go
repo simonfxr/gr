@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -103,4 +105,22 @@ func fakeBitbucketAPI(t *testing.T) (*fakeAPI, *Info) {
 	f := newFakeAPI(t, func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer bb-token" })
 	t.Setenv("BITBUCKET_API_BASE_URL", f.srv.URL)
 	return f, &Info{Provider: ProviderBitbucket, Owner: "workspace", Repo: "repo"}
+}
+
+// TestRequestsHonorContext checks that every provider aborts on a canceled
+// context instead of sending (or retrying) the request.
+func TestRequestsHonorContext(t *testing.T) {
+	for _, setup := range []func(*testing.T) (*fakeAPI, *Info){fakeGitHub, fakeGitLab, fakeBitbucketAPI} {
+		f, info := setup(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := info.Provider.PrView(ctx, info, 1); !errors.Is(err, context.Canceled) {
+			t.Errorf("%s: err = %v, want context.Canceled", info.Provider, err)
+		}
+		f.mu.Lock()
+		if len(f.calls) > 0 {
+			t.Errorf("%s: sent %v despite canceled context", info.Provider, f.calls)
+		}
+		f.mu.Unlock()
+	}
 }

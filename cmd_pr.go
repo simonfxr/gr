@@ -16,11 +16,10 @@ import (
 	"github.com/simonfxr/gr/tables"
 )
 
-func runPR(cmd *PRCmd, info *provider.Info) error {
+func runPR(ctx context.Context, cmd *PRCmd, info *provider.Info) error {
 	if info == nil {
 		return errors.New("cannot detect provider/repo info")
 	}
-	ctx := context.Background()
 	switch {
 	case cmd.List != nil:
 		return prList(ctx, info, cmd.List)

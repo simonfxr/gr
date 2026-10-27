@@ -145,7 +145,7 @@ func prListGitHub(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 }
 
 func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullRequest, error) {
-	gl, err := gitlabClient(nfo)
+	gl, err := gitlabClient(ctx, nfo)
 	if err != nil {
 		return nil, err
 	}

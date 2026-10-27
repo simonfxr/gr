@@ -15,14 +15,17 @@ const (
 	exitError    = 1 // any other failure (API, network, git, ...)
 	exitUsage    = 2 // invalid or conflicting arguments
 	exitNotFound = 3 // PR (or comment/task) not found, or PR selection ambiguous
+	// exitInterrupted follows the shell convention 128+SIGINT.
+	exitInterrupted = 130
 )
 
 // Error kinds reported in JSON error output.
 const (
-	kindError     = "error"
-	kindUsage     = "usage"
-	kindNotFound  = "not_found"
-	kindAmbiguous = "ambiguous"
+	kindError       = "error"
+	kindUsage       = "usage"
+	kindNotFound    = "not_found"
+	kindAmbiguous   = "ambiguous"
+	kindInterrupted = "interrupted"
 )
 
 // cliError is an error with a machine-readable kind.
@@ -62,6 +65,8 @@ func exitCode(err error) int {
 		return exitUsage
 	case kindNotFound, kindAmbiguous:
 		return exitNotFound
+	case kindInterrupted:
+		return exitInterrupted
 	default:
 		return exitError
 	}

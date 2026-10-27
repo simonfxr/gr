@@ -94,7 +94,7 @@ func prCreateGitHub(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 }
 
 func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetails, error) {
-	gl, err := gitlabClient(nfo)
+	gl, err := gitlabClient(ctx, nfo)
 	if err != nil {
 		return nil, err
 	}

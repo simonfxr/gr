@@ -35,7 +35,7 @@ func (p Provider) BranchDelete(ctx context.Context, nfo *Info, name string, opts
 				return fmt.Errorf("refusing to delete default branch %q (use --force)", name)
 			}
 		case ProviderGitLab:
-			gl, err := gitlabClient(nfo)
+			gl, err := gitlabClient(ctx, nfo)
 			if err != nil {
 				return err
 			}
@@ -86,7 +86,7 @@ func branchDeleteGitHub(ctx context.Context, nfo *Info, name string) error {
 }
 
 func branchDeleteGitLab(ctx context.Context, nfo *Info, name string) error {
-	gl, err := gitlabClient(nfo)
+	gl, err := gitlabClient(ctx, nfo)
 	if err != nil {
 		return err
 	}

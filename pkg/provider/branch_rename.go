@@ -43,7 +43,7 @@ func branchRenameGitHub(ctx context.Context, nfo *Info, oldName, newName string,
 }
 
 func branchRenameGitLab(ctx context.Context, nfo *Info, oldName, newName string, opts BranchRenameOptions) error {
-	gl, err := gitlabClient(nfo)
+	gl, err := gitlabClient(ctx, nfo)
 	if err != nil {
 		return err
 	}

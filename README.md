@@ -77,10 +77,11 @@ MSG
 ### Scripting and agents
 
 - **Exit status:** `0` success, `1` error, `2` invalid usage, `3` PR/comment/task
-  not found or PR selection ambiguous. Empty listings exit `0`.
+  not found or PR selection ambiguous, `130` interrupted (Ctrl-C cancels
+  in-flight requests). Empty listings exit `0`.
 - **JSON:** `--json` is available on every command that produces data; field
   names are snake_case. With `--json`, errors are written to stderr as
-  `{"error": "...", "kind": "usage|not_found|ambiguous|error", "exit_code": N}`;
+  `{"error": "...", "kind": "usage|not_found|ambiguous|interrupted|error", "exit_code": N}`;
   ambiguous PR selection adds `"candidates"` (the matching PRs).
 - **Batch comments:** `addcomments --json` prints one result per input item
   (`{path, line, ok, comment | error}`) and exits `1` if any item failed.

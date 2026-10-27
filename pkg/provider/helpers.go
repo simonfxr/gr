@@ -46,8 +46,9 @@ func githubClient(ctx context.Context, nfo *Info) (*githublib.Client, error) {
 	return githublib.NewClient(httpClient), nil
 }
 
-// gitlabClient returns an authenticated GitLab client using token from config/env.
-func gitlabClient(nfo *Info) (*gitlab.Client, error) {
+// gitlabClient returns an authenticated GitLab client using token from
+// config/env. All its requests use ctx.
+func gitlabClient(ctx context.Context, nfo *Info) (*gitlab.Client, error) {
 	var cfg *config.ProviderConfig
 	if nfo != nil && nfo.Config != nil {
 		cfg = &nfo.Config.GitLab
@@ -59,10 +60,11 @@ func gitlabClient(nfo *Info) (*gitlab.Client, error) {
 	if token == "" {
 		return nil, errors.New("gitlab token not configured (set GITLAB_TOKEN or configure in ~/.config/gr/config.toml)")
 	}
+	opts := []gitlab.ClientOptionFunc{gitlab.WithRequestOptions(gitlab.WithContext(ctx))}
 	if nfo != nil && nfo.Provider == ProviderGitLab && nfo.Variant == "self-hosted" && nfo.HTTPBase != "" {
-		return gitlab.NewClient(token, gitlab.WithBaseURL(strings.TrimRight(nfo.HTTPBase, "/")+"/api/v4"))
+		opts = append(opts, gitlab.WithBaseURL(strings.TrimRight(nfo.HTTPBase, "/")+"/api/v4"))
 	}
-	return gitlab.NewClient(token)
+	return gitlab.NewClient(token, opts...)
 }
 
 // bitbucketCredentials returns the Bitbucket Cloud username (may be empty) and token.
