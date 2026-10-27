@@ -105,3 +105,42 @@ func TestGitLabPrMergeRebaseUnsupported(t *testing.T) {
 		t.Errorf("err = %v, want invalid argument", err)
 	}
 }
+
+func TestGitLabPrViewDraft(t *testing.T) {
+	f, info := fakeGitLab(t)
+	f.reply("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5", http.StatusOK, gitlabMR5)
+	if d, err := ProviderGitLab.PrView(t.Context(), info, 5); err != nil || !d.Draft {
+		t.Errorf("got %+v, %v", d, err)
+	}
+}
+
+func TestGitLabPrCreateDraft(t *testing.T) {
+	for _, tc := range []struct {
+		title string
+		draft bool
+		want  string
+	}{
+		{"Add y", false, "Add y"},
+		{"Add y", true, "Draft: Add y"},
+		{"draft: Add y", true, "draft: Add y"},
+		{"[Draft] Add y", true, "[Draft] Add y"},
+	} {
+		f, info := fakeGitLab(t)
+		f.handle("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+			if q := r.URL.Query(); q.Get("state") != "opened" || q.Get("source_branch") != "feature/y" {
+				t.Errorf("duplicate check query = %v", q)
+			}
+			writeJSON(w, http.StatusOK, `[]`)
+		})
+		f.handle("POST /api/v4/projects/group%2Fsub%2Fproj/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+			got := decodeJSON(t, r)
+			if got["title"] != tc.want || got["source_branch"] != "feature/y" || got["target_branch"] != "main" {
+				t.Errorf("payload = %v, want title %q", got, tc.want)
+			}
+			writeJSON(w, http.StatusCreated, gitlabMR5)
+		})
+		if _, err := ProviderGitLab.PrCreate(t.Context(), info, CreateOptions{Title: tc.title, Draft: tc.draft, Base: "main", Head: "feature/y"}); err != nil {
+			t.Error(err)
+		}
+	}
+}

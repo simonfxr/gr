@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	githublib "github.com/google/go-github/v74/github"
@@ -129,6 +130,10 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	if err != nil {
 		return nil, err
 	}
+	if in.Draft && !gitlabDraftTitle.MatchString(title) {
+		// GitLab has no draft flag on creation; a title prefix marks drafts.
+		title = "Draft: " + title
+	}
 
 	mr, _, err := gl.MergeRequests.CreateMergeRequest(project, &gitlab.CreateMergeRequestOptions{
 		Title:        new(title),
@@ -144,6 +149,9 @@ func prCreateGitLab(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetail
 	}
 	return gitlabPRDetails(&mr.BasicMergeRequest), nil
 }
+
+// gitlabDraftTitle matches the title prefixes by which GitLab marks drafts.
+var gitlabDraftTitle = regexp.MustCompile(`(?i)^\s*(\[draft\]|\(draft\)|draft:|draft\s*-)`)
 
 func prCreateBitbucket(ctx context.Context, nfo *Info, in CreateOptions) (*PRDetails, error) {
 	bb, err := newBitbucketAPIClient(nfo)

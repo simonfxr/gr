@@ -93,7 +93,7 @@ func gitlabPRDetails(mr *gitlab.BasicMergeRequest) *PRDetails {
 		Body:   mr.Description,
 		State:  mr.State,
 		Merged: mr.MergedAt != nil && !mr.MergedAt.IsZero(),
-		Draft:  false, // GitLab draft/WIP not standardized in this client; omit
+		Draft:  mr.Draft,
 		Base:   mr.TargetBranch,
 		Head:   mr.SourceBranch,
 		URL:    mr.WebURL,

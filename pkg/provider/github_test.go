@@ -140,3 +140,24 @@ func TestPrMergeRejectsUnknownMethod(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubPrCreate(t *testing.T) {
+	f, info := fakeGitHub(t)
+	f.handle("GET /api/v3/repos/owner/repo/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if q := r.URL.Query(); q.Get("state") != "open" || q.Get("head") != "owner:feature/x" {
+			t.Errorf("duplicate check query = %v", q)
+		}
+		writeJSON(w, http.StatusOK, `[]`)
+	})
+	f.handle("POST /api/v3/repos/owner/repo/pulls", func(w http.ResponseWriter, r *http.Request) {
+		want := map[string]any{"title": "Add x", "body": "desc", "head": "feature/x", "base": "main", "draft": true}
+		if got := decodeJSON(t, r); !reflect.DeepEqual(got, want) {
+			t.Errorf("payload = %v", got)
+		}
+		writeJSON(w, http.StatusCreated, githubPR7)
+	})
+	d, err := ProviderGitHub.PrCreate(t.Context(), info, CreateOptions{Title: "Add x", Body: "desc", Base: "main", Head: "feature/x", Draft: true})
+	if err != nil || d.Number != 7 || !d.Draft {
+		t.Errorf("got %+v, %v", d, err)
+	}
+}
