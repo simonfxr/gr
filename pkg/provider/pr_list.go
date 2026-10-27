@@ -224,7 +224,7 @@ func prListGitLab(ctx context.Context, nfo *Info, opts ListOptions) ([]PullReque
 				return results, nil
 			}
 		}
-		if resp.CurrentPage >= resp.TotalPages || resp.NextPage == 0 {
+		if resp.NextPage == 0 {
 			break
 		}
 		listOpts.Page = resp.NextPage

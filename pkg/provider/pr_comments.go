@@ -94,7 +94,7 @@ func prCommentsGitLab(ctx context.Context, nfo *Info, number int) ([]PRComment, 
 			// Optimize: we can build from base URL and IIDs if needed; keep simple by fetching once.
 			out = append(out, pc)
 		}
-		if resp == nil || resp.CurrentPage >= resp.TotalPages || resp.NextPage == 0 {
+		if resp == nil || resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage

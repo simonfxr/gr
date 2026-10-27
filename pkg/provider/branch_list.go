@@ -127,7 +127,7 @@ func branchListRemoteGitLab(ctx context.Context, nfo *Info, opts BranchListOptio
 			}
 			out = append(out, info)
 		}
-		if resp == nil || resp.NextPage == 0 || resp.CurrentPage >= resp.TotalPages {
+		if resp == nil || resp.NextPage == 0 {
 			break
 		}
 		page = resp.NextPage

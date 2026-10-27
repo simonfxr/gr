@@ -188,7 +188,7 @@ func countGitLabOpenMRs(gl *gitlab.Client, project string, sourceBranch, targetB
 			return 0, err
 		}
 		total += len(mrs)
-		if resp == nil || resp.NextPage == 0 || resp.CurrentPage >= resp.TotalPages {
+		if resp == nil || resp.NextPage == 0 {
 			break
 		}
 		page = resp.NextPage
@@ -241,7 +241,7 @@ func retargetGitLabMRs(gl *gitlab.Client, project, oldTarget, newTarget string) 
 				return fmt.Errorf("failed to close old MR !%d: %w", mr.IID, err)
 			}
 		}
-		if resp == nil || resp.NextPage == 0 || resp.CurrentPage >= resp.TotalPages {
+		if resp == nil || resp.NextPage == 0 {
 			break
 		}
 		page = resp.NextPage

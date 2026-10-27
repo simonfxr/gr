@@ -36,7 +36,8 @@ func TestGitLabPrViewNotFound(t *testing.T) {
 	}
 }
 
-// gitlabPage writes one page of a GitLab offset-paginated listing.
+// gitlabPage writes one page of a GitLab offset-paginated listing. Like
+// GitLab for collections over 10,000 items, it omits X-Total(-Pages).
 func gitlabPage(w http.ResponseWriter, page, next string, body string) {
 	w.Header().Set("X-Page", page)
 	w.Header().Set("X-Per-Page", "2")
@@ -53,7 +54,6 @@ func TestGitLabPrListPaginates(t *testing.T) {
 		if q.Get("state") != "opened" || q.Get("author_username") != "bob" || q.Get("target_branch") != "main" {
 			t.Errorf("query = %v", q)
 		}
-		w.Header().Set("X-Total-Pages", "2")
 		if q.Get("page") == "2" {
 			gitlabPage(w, "2", "", `[{"iid":3,"title":"c","state":"opened","author":{"username":"bob"}}]`)
 			return
@@ -142,5 +142,42 @@ func TestGitLabPrCreateDraft(t *testing.T) {
 		if _, err := ProviderGitLab.PrCreate(t.Context(), info, CreateOptions{Title: tc.title, Draft: tc.draft, Base: "main", Head: "feature/y"}); err != nil {
 			t.Error(err)
 		}
+	}
+}
+
+func TestGitLabBranchListPaginates(t *testing.T) {
+	f, info := fakeGitLab(t)
+	f.handle("GET /api/v4/projects/group%2Fsub%2Fproj/repository/branches", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			gitlabPage(w, "2", "", `[{"name":"c","commit":{"author_name":"Bob","committed_date":"2026-10-03T10:00:00Z"}}]`)
+			return
+		}
+		gitlabPage(w, "1", "2", `[{"name":"a"},{"name":"b"}]`)
+	})
+	branches, err := ProviderGitLab.BranchListRemote(t.Context(), info, BranchListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 3 || branches[2].Name != "c" || branches[2].Author != "Bob" {
+		t.Errorf("branches = %+v", branches)
+	}
+}
+
+func TestGitLabPrCommentsPaginates(t *testing.T) {
+	f, info := fakeGitLab(t)
+	f.handle("GET /api/v4/projects/group%2Fsub%2Fproj/merge_requests/5/notes", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			gitlabPage(w, "2", "", `[{"id":3,"body":"third","author":{"username":"bob"}}]`)
+			return
+		}
+		gitlabPage(w, "1", "2", `[{"id":1,"body":"first","author":{"username":"bob"}},
+			{"id":2,"body":"assigned","system":true,"author":{"username":"bob"}}]`)
+	})
+	comments, err := ProviderGitLab.PrComments(t.Context(), info, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 2 || comments[0].ID != 1 || comments[1].ID != 3 {
+		t.Errorf("comments = %+v", comments)
 	}
 }
